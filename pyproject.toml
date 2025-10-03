@@ -1,0 +1,11 @@
+[tool.black]
+line-length = 120
+target-version = ["py313"]
+skip-string-normalization = false
+
+[tool.isort]
+profile = "black"
+combine_as_imports = true
+src_paths = ["src"]
+skip_gitignore = true
+ensure_newline_before_comments = true
