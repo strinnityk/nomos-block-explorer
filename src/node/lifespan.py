@@ -1,8 +1,7 @@
-import random
+import logging
 from asyncio import TaskGroup, create_task, sleep
 from contextlib import asynccontextmanager
-from itertools import chain
-from typing import TYPE_CHECKING, AsyncGenerator
+from typing import TYPE_CHECKING, AsyncGenerator, AsyncIterator
 
 from rusty_results import Option
 
@@ -19,32 +18,34 @@ from node.models.transactions import Transaction
 if TYPE_CHECKING:
     from core.app import NBE
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def node_lifespan(app: "NBE") -> AsyncGenerator[None]:
-    # app.state.node_manager = DockerModeManager()
-    # app.state.node_api = HttpApi(host="127.0.0.1", port=3000)
-
     db_client = SqliteClient()
 
     app.state.node_manager = FakeNodeManager()
-    app.state.node_api = FakeNodeApi()
+    # app.state.node_manager = DockerModeManager(app.settings.node_compose_filepath)
+    # app.state.node_api = FakeNodeApi()
+    app.state.node_api = HttpNodeApi(host="127.0.0.1", port=18080)
+
     app.state.db_client = db_client
     app.state.block_repository = BlockRepository(db_client)
     app.state.transaction_repository = TransactionRepository(db_client)
     try:
-        print("Starting node...")
+        logger.info("Starting node...")
         await app.state.node_manager.start()
-        print("Node started.")
+        logger.info("Node started.")
 
-        app.state.subscription_to_updates_handle = create_task(subscription_to_updates(app))
+        app.state.subscription_to_updates_handle = create_task(subscribe_to_updates(app))
         app.state.backfill = create_task(backfill(app))
 
         yield
     finally:
-        print("Stopping node...")
+        logger.info("Stopping node...")
         await app.state.node_manager.stop()
-        print("Node stopped.")
+        logger.info("Node stopped.")
 
 
 # ================
@@ -69,83 +70,88 @@ _SUBSCRIPTION_START_SLOT = 5  # Simplification for now.
 # ================
 
 
-async def subscription_to_updates(app: "NBE") -> None:
-    print("✅ Subscription to new blocks and transactions started.")
+async def subscribe_to_updates(app: "NBE") -> None:
+    logger.info("✅ Subscription to new blocks and transactions started.")
     async with TaskGroup() as tg:
         tg.create_task(subscribe_to_new_blocks(app))
         tg.create_task(subscribe_to_new_transactions(app))
-    print("Subscription to new blocks and transactions finished.")
+    logger.info("Subscription to new blocks and transactions finished.")
 
 
-async def subscribe_to_new_blocks(
-    app: "NBE", interval: int = 5, subscription_start_slot: int = _SUBSCRIPTION_START_SLOT
-):
-    while app.state.is_running:
+async def _gracefully_close_stream(stream: AsyncIterator) -> None:
+    aclose = getattr(stream, "aclose", None)
+    if aclose is not None:
         try:
-            new_block: Block = Block.from_random(slot_start=subscription_start_slot, slot_end=subscription_start_slot)
-            print("> New Block")
-            await app.state.block_repository.create((new_block,))
-            subscription_start_slot += 1
+            await aclose()
         except Exception as e:
-            print(f"Error while subscribing to new blocks: {e}")
-        finally:
-            await sleep(interval)
+            logger.error(f"Error while closing the new blocks stream: {e}")
 
 
-async def subscribe_to_new_transactions(app: "NBE", interval: int = 5):
-    while app.state.is_running:
-        try:
-            new_transaction: Transaction = Transaction.from_random()
-            print("> New TX")
-            await app.state.transaction_repository.create((new_transaction,))
-        except Exception as e:
-            print(f"Error while subscribing to new transactions: {e}")
-        finally:
-            await sleep(interval)
+async def subscribe_to_new_blocks(app: "NBE"):
+    blocks_stream: AsyncGenerator[Block] = app.state.node_api.get_blocks_stream()  # type: ignore[call-arg]
+    try:
+        while app.state.is_running:
+            try:
+                block = await anext(blocks_stream)  # TODO: Use anext's Sentinel?
+            except StopAsyncIteration:
+                logger.error("Subscription to the new blocks stream ended unexpectedly. Please restart the node.")
+                break
+            except TimeoutError:
+                continue
+            except Exception as e:
+                logger.error(f"Error while fetching new blocks: {e}")
+                continue
+
+            await app.state.block_repository.create(block)
+    finally:
+        await _gracefully_close_stream(blocks_stream)
 
 
-async def backfill(app: "NBE", delay: int = 3) -> None:
-    await sleep(delay)  # Wait for some data to be present: Simplification for now.s
+async def subscribe_to_new_transactions(_app: "NBE"):
+    pass
 
-    print("Backfilling started.")
+
+async def backfill(app: "NBE") -> None:
+    logger.info("Backfilling started.")
     async with TaskGroup() as tg:
-        tg.create_task(backfill_blocks(app))
+        tg.create_task(backfill_blocks(app, db_hit_interval_seconds=3))
         tg.create_task(backfill_transactions(app))
-    print("✅ Backfilling finished.")
+    logger.info("✅ Backfilling finished.")
 
 
-async def backfill_blocks(app: "NBE"):
-    # Assuming at most one gap. This will be either genesis block (no gap) or the earliest received block from subscription.
-    # If genesis, do nothing.
-    # If earliest received block from subscription, backfill.
-    print("Checking for block gaps to backfill...")
+async def get_earliest_block_slot(app: "NBE") -> Option[int]:
     earliest_block: Option[Block] = await app.state.block_repository.get_earliest()
-    earliest_block: Block = earliest_block.expects("Subscription should have provided at least one block by now.")
-    earliest_block_slot = earliest_block.slot
+    return earliest_block.map(lambda block: block.slot)
+
+
+async def backfill_blocks(app: "NBE", *, db_hit_interval_seconds: int, batch_size: int = 50):
+    """
+    FIXME: This is a very naive implementation:
+      - One block per slot.
+      - There's at most one gap to backfill (from genesis to earliest block).
+    FIXME: First block received is slot=2
+    """
+    logger.info("Checking for block gaps to backfill...")
+    # Hit the database until we get a block
+    while (earliest_block_slot_option := await get_earliest_block_slot(app)).is_empty:
+        logger.debug("No blocks were found in the database yet. Waiting...")
+        await sleep(db_hit_interval_seconds)
+    earliest_block_slot: int = earliest_block_slot_option.unwrap()
+
     if earliest_block_slot == 0:
-        print("No need to backfill blocks, genesis block already present.")
+        logger.info("No blocks to backfill.")
         return
 
-    print(f"Backfilling blocks from slot {earliest_block_slot - 1} down to 0...")
-
-    def n_blocks():
-        return random.choices((1, 2, 3), (6, 3, 1))[0]
-
-    blocks = (
-        (Block.from_random(slot_start=slot_index, slot_end=slot_index) for _ in range(n_blocks()))
-        for slot_index in reversed(range(0, earliest_block_slot))
-    )
-    flattened = list(chain.from_iterable(blocks))
-    await sleep(10)  # Simulate some backfilling delay
-    await app.state.block_repository.create(flattened)
-    print("Backfilling blocks completed.")
+    slot_to = earliest_block_slot - 1
+    logger.info(f"Backfilling blocks from slot {slot_to} down to 0...")
+    while slot_to > 0:
+        slot_from = max(0, slot_to - batch_size)
+        blocks = await app.state.node_api.get_blocks(slot_from=slot_from, slot_to=slot_to)
+        logger.debug(f"Backfilling {len(blocks)} blocks from slot {slot_from} to {slot_to}...")
+        await app.state.block_repository.create(*blocks)
+        slot_to = slot_from
+    logger.info("Backfilling blocks completed.")
 
 
-async def backfill_transactions(app: "NBE"):
-    # Assume there's some TXs to backfill
-    n = random.randint(0, 5)
-    print(f"Backfilling {n} transactions...")
-    transactions = (Transaction.from_random() for _ in range(n))
-    await sleep(10)  # Simulate some backfilling delay
-    await app.state.transaction_repository.create(transactions)
-    print("Backfilling transactions completed.")
+async def backfill_transactions(_app: "NBE"):
+    pass

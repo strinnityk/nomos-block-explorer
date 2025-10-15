@@ -1,5 +1,5 @@
 from random import choices, random
-from typing import List
+from typing import AsyncIterator, List
 
 from node.api.base import NodeApi
 from node.models.blocks import Block
@@ -25,3 +25,7 @@ class FakeNodeApi(NodeApi):
 
     async def get_blocks(self) -> List[Block]:
         return [Block.from_random() for _ in range(1)]
+
+    async def get_blocks_stream(self) -> AsyncIterator[Block]:
+        while True:
+            yield Block.from_random()

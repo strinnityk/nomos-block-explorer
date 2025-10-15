@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List
+from typing import AsyncIterator, List
 
 from node.models.blocks import Block
 from node.models.health import Health
@@ -16,5 +16,9 @@ class NodeApi(ABC):
         pass
 
     @abstractmethod
-    async def get_blocks(self) -> List[Block]:
+    async def get_blocks(self, **kwargs) -> List[Block]:
+        pass
+
+    @abstractmethod
+    async def get_blocks_stream(self) -> AsyncIterator[List[Block]]:
         pass

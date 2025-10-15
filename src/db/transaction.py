@@ -1,4 +1,5 @@
-from datetime import datetime, timedelta
+from asyncio import sleep
+from datetime import datetime
 from typing import AsyncIterator, Iterable, List
 
 from rusty_results import Empty, Option, Some
@@ -20,6 +21,8 @@ class TransactionRepository:
             session.commit()
 
     async def get_latest(self, limit: int, descending: bool = True) -> List[Transaction]:
+        return []
+
         statement = select(Transaction).limit(limit)
         if descending:
             statement = statement.order_by(Transaction.timestamp.desc())
@@ -31,6 +34,11 @@ class TransactionRepository:
             return results.all()
 
     async def updates_stream(self, timestamp_from: datetime) -> AsyncIterator[List[Transaction]]:
+        while True:
+            if False:
+                yield []
+            await sleep(10)
+
         _timestamp_from = timestamp_from
         while True:
             statement = (
@@ -49,6 +57,8 @@ class TransactionRepository:
             yield transactions
 
     async def get_earliest(self) -> Option[Transaction]:
+        return Empty()
+
         with self.client.session() as session:
             statement = select(Transaction).order_by(Transaction.slot.asc()).limit(1)
             results: Result[Transaction] = session.exec(statement)

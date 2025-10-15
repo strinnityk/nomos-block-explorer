@@ -22,35 +22,12 @@
         .card { background: var(--card); border: 1px solid #20263a; border-radius: 10px; overflow: hidden; }
         .card-header { display:flex; justify-content:space-between; align-items:center; padding:12px 14px; border-bottom: 1px solid #1f2435; }
 
-        /* SCROLLER */
-        .table-wrapper {
-            overflow-y: auto;
-            overflow-x: auto;         /* horizontal scrolling back */
-            -webkit-overflow-scrolling: touch;
-            max-height: 60vh;
-            scrollbar-gutter: stable both-edges;
-            padding-right: 8px;
-        }
+        .table-wrapper { overflow: auto; -webkit-overflow-scrolling: touch; max-height: 60vh; scrollbar-gutter: stable both-edges; padding-right: 8px; }
+        table { border-collapse: collapse; table-layout: fixed; width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+        .table-wrapper .table--blocks { min-width: 860px; }
+        .table-wrapper .table--txs    { min-width: 980px; }
 
-        table {
-            border-collapse: collapse;
-            table-layout: fixed;
-            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-            width: 100%;
-        }
-        /* Force tables to be wider than the container when needed so horizontal scroll appears */
-        .table-wrapper .table--blocks { min-width: 560px; }
-        .table-wrapper .table--txs    { min-width: 980px; } /* Hash + From→To + Amount + Time */
-
-        th, td {
-            text-align:left;
-            padding:8px 10px;
-            border-bottom:1px solid #1f2435;
-            vertical-align: top;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
+        th, td { text-align:left; padding:8px 10px; border-bottom:1px solid #1f2435; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: top; }
         th { color: var(--muted); font-weight: normal; font-size: 13px; position: sticky; top: 0; background: var(--card); z-index: 1; }
         tbody td { height: 28px; }
         tr:nth-child(odd) { background: #121728; }
@@ -58,10 +35,13 @@
         .twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 16px; }
         @media (max-width: 960px) { .twocol { grid-template-columns: 1fr; } }
 
-        .table--txs th:last-child, .table--txs td:last-child { padding-right: 16px; }
-
-        .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+        .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
         .amount { font-variant-numeric: tabular-nums; }
+        .linkish { color: var(--fg); text-decoration: none; border-bottom: 1px dotted #2a3350; }
+        .linkish:hover { border-bottom-color: var(--fg); }
+
+        /* Placeholder rows for fixed table height */
+        tr.ph td { opacity: .35; }
     </style>
 </head>
 <body>
@@ -81,15 +61,19 @@
             <div class="table-wrapper">
                 <table class="table--blocks">
                     <colgroup>
-                        <col style="width:100px" />
-                        <col style="width:260px" />
-                        <col style="width:80px" />
+                        <col style="width:90px" />    <!-- Slot -->
+                        <col style="width:260px" />   <!-- Block Root -->
+                        <col style="width:260px" />   <!-- Parent -->
+                        <col style="width:80px" />    <!-- Txs -->
+                        <col style="width:180px" />   <!-- Time -->
                     </colgroup>
                     <thead>
                     <tr>
                         <th>Slot</th>
-                        <th>Hash</th>
+                        <th>Block Root</th>
+                        <th>Parent</th>
                         <th>Txs</th>
+                        <th>Time</th>
                     </tr>
                     </thead>
                     <tbody id="blocks-body"></tbody>
@@ -107,9 +91,9 @@
                 <table class="table--txs">
                     <colgroup>
                         <col style="width:260px" />
-                        <col /> <!-- From → To -->
+                        <col />
                         <col style="width:120px" />
-                        <col style="width:180px" /> <!-- Time -->
+                        <col style="width:180px" />
                     </colgroup>
                     <thead>
                     <tr>
@@ -133,9 +117,26 @@
     const TXS_ENDPOINT = `${API_PREFIX}/transactions/stream`;
     const TABLE_SIZE = 10;
 
+    // ------------------ RELOAD/UNLOAD ABORT PATCH (prevents “Error in input stream”) ------------------
+    // We keep AbortControllers for each stream and abort them when the page unloads/reloads,
+    // so the fetch ReadableStreams don't throw TypeError during navigation.
+    let healthController = null;
+    let blocksController = null;
+    let txsController = null;
+    addEventListener("beforeunload", () => {
+        healthController?.abort();
+        blocksController?.abort();
+        txsController?.abort();
+    }, { passive: true });
+    addEventListener("pagehide", () => {
+        healthController?.abort();
+        blocksController?.abort();
+        txsController?.abort();
+    }, { passive: true });
+    // --------------------------------------------------------------------------------------------------
+
     // ---- Health pill ----
     const pill = document.getElementById("status-pill");
-    let healthController = null;
     let state = "connecting";
     function setState(next) {
         if (next === state) return;
@@ -156,7 +157,9 @@
             if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
             const reader = res.body.getReader(); const decoder = new TextDecoder(); let buf = "";
             while (true) {
-                const { value, done } = await reader.read(); if (done) break;
+                let chunk;
+                try { chunk = await reader.read(); } catch { if (healthController.signal.aborted) return; else break; }
+                const { value, done } = chunk; if (done) break;
                 buf += decoder.decode(value, { stream: true });
                 const lines = buf.split("\n"); buf = lines.pop() ?? "";
                 for (const line of lines) { if (!line.trim()) continue; try { applyHealth(JSON.parse(line)); } catch {} }
@@ -165,55 +168,35 @@
     }
     connectHealth();
 
-    // ---- NDJSON reader ----
+    // ---- NDJSON reader (shared) ----
     async function streamNDJSON(url, onItem, { signal } = {}) {
         const res = await fetch(url, { headers: { "accept": "application/x-ndjson" }, signal, cache: "no-cache" });
         if (!res.ok || !res.body) throw new Error(`Stream failed: ${res.status}`);
         const reader = res.body.getReader(); const decoder = new TextDecoder(); let buf = "";
         while (true) {
-            const { value, done } = await reader.read(); if (done) break;
+            let chunk;
+            try { chunk = await reader.read(); }
+            catch { if (signal?.aborted) return; else break; } // quiet on navigation abort
+            const { value, done } = chunk; if (done) break;
             buf += decoder.decode(value, { stream: true });
             let idx;
             while ((idx = buf.indexOf("\n")) >= 0) {
                 const line = buf.slice(0, idx).trim(); buf = buf.slice(idx + 1);
-                if (!line) continue; try { onItem(JSON.parse(line)); } catch {}
+                if (!line) continue;
+                try { onItem(JSON.parse(line)); } catch {}
             }
         }
         const last = buf.trim(); if (last) { try { onItem(JSON.parse(last)); } catch {} }
     }
 
-    // ---- Table helpers ----
-    function ensureSize(tbody, colCount) {
-        while (tbody.rows.length < TABLE_SIZE) {
-            const row = document.createElement("tr");
-            for (let i = 0; i < colCount; i++) {
-                const td = document.createElement("td");
-                td.innerHTML = "&nbsp;";
-                row.appendChild(td);
-            }
-            tbody.appendChild(row);
-        }
+    // ---- Helpers ----
+    function shortHex(s, left = 10, right = 8) {
+        if (!s) return "";
+        return s.length <= left + right + 1 ? s : `${s.slice(0,left)}…${s.slice(-right)}`;
     }
-    function appendRow(tbody, cells) {
-        const tr = document.createElement("tr");
-        for (const cell of cells) {
-            const td = document.createElement("td");
-            if (cell && cell.html !== undefined) td.innerHTML = cell.html;
-            else td.textContent = String(cell ?? "");
-            if (cell && cell.class) td.className = cell.class;
-            tr.appendChild(td);
-        }
-        tbody.insertBefore(tr, tbody.firstChild);
-        while (tbody.rows.length > TABLE_SIZE) tbody.deleteRow(-1);
-    }
-    function shortHex(s, left = 6, right = 4) { if (!s) return ""; return s.length <= left + right + 2 ? s : `${s.slice(0,left)}…${s.slice(-right)}`; }
-
-    // Flexible timestamp formatter
     function fmtTime(ts) {
         if (ts == null) return "";
-        let d;
-        if (typeof ts === "number") d = new Date(ts < 1e12 ? ts * 1000 : ts);
-        else d = new Date(ts);
+        let d = typeof ts === "number" ? new Date(ts < 1e12 ? ts * 1000 : ts) : new Date(ts);
         if (isNaN(d)) return "";
         return d.toLocaleString(undefined, {
             year: "numeric", month: "2-digit", day: "2-digit",
@@ -221,37 +204,114 @@
         });
     }
 
-    // ---- Blocks ----
+    // Keep table exactly TABLE_SIZE rows using placeholders
+    function ensureSize(tbody, cols, size) {
+        // remove existing placeholders first
+        for (let i = tbody.rows.length - 1; i >= 0; i--) {
+            if (tbody.rows[i].classList.contains("ph")) tbody.deleteRow(i);
+        }
+        let real = tbody.rows.length;
+        // pad
+        for (let i = 0; i < size - real; i++) {
+            const tr = document.createElement("tr"); tr.className = "ph";
+            for (let c = 0; c < cols; c++) { const td = document.createElement("td"); td.innerHTML = "&nbsp;"; tr.appendChild(td); }
+            tbody.appendChild(tr);
+        }
+    }
+
+    // ---- Blocks (dedupe by slot:id + fixed-size table) ----
     (function initBlocks() {
         const body = document.getElementById("blocks-body");
         const counter = document.getElementById("blocks-count");
-        let n = 0;
-        ensureSize(body, 3);
-        streamNDJSON(BLOCKS_ENDPOINT, (b) => {
-            appendRow(body, [
-                { html: `<span class="mono">${b.slot}</span>` },
-                { html: `<span class="mono" title="${b.hash}">${shortHex(b.hash, 10, 8)}</span>` },
-                b.transaction_count,
-            ]);
-            counter.textContent = (++n).toString();
-        }).catch(err => console.error("Blocks stream error:", err));
+        const seen = new Set(); // keys "slot:id"
+
+        function pruneAndPad() {
+            // remove placeholders
+            for (let i = body.rows.length - 1; i >= 0; i--) if (body.rows[i].classList.contains("ph")) body.deleteRow(i);
+            // cap real rows and drop keys for removed rows
+            while ([...body.rows].filter(r => !r.classList.contains("ph")).length > TABLE_SIZE) {
+                const last = body.rows[body.rows.length - 1];
+                const key = last?.dataset?.key;
+                if (key) seen.delete(key);
+                body.deleteRow(-1);
+            }
+            // pad back to TABLE_SIZE
+            const real = [...body.rows].filter(r => !r.classList.contains("ph")).length;
+            for (let i = 0; i < TABLE_SIZE - real; i++) {
+                const tr = document.createElement("tr"); tr.className = "ph";
+                for (let c = 0; c < 5; c++) { const td = document.createElement("td"); td.innerHTML = "&nbsp;"; tr.appendChild(td); }
+                body.appendChild(tr);
+            }
+            counter.textContent = String(real);
+        }
+
+        function appendBlockRow(b, key) {
+            const tr = document.createElement("tr");
+            tr.dataset.key = key;
+            const td = (html) => { const x = document.createElement("td"); x.innerHTML = html; return x; };
+            tr.appendChild(td(`<span class="mono">${b.slot}</span>`));
+            tr.appendChild(td(`<span class="mono" title="${b.root}">${shortHex(b.root)}</span>`));
+            tr.appendChild(td(`<span class="mono" title="${b.parent}">${shortHex(b.parent)}</span>`));
+            tr.appendChild(td(`<span class="mono">${b.txCount}</span>`));
+            tr.appendChild(td(`<span class="mono" title="${b.time ?? ""}">${fmtTime(b.time)}</span>`));
+            body.insertBefore(tr, body.firstChild);
+            pruneAndPad();
+        }
+
+        function normalizeBlock(raw) {
+            const h = raw.header ?? raw;
+            const created = raw.created_at ?? raw.header?.created_at ?? null;
+            return {
+                id: Number(raw.id ?? 0),     // include id for (slot,id) dedupe
+                slot: Number(h?.slot ?? raw.slot ?? 0),
+                root: h?.block_root ?? raw.block_root ?? "",
+                parent: h?.parent_block ?? raw.parent_block ?? "",
+                txCount: Array.isArray(raw.transactions) ? raw.transactions.length
+                    : (typeof raw.transaction_count === "number" ? raw.transaction_count : 0),
+                time: created
+            };
+        }
+
+        ensureSize(body, 5, TABLE_SIZE);
+
+        // start stream (with reload-abort controller)
+        if (blocksController) blocksController.abort();
+        blocksController = new AbortController();
+
+        streamNDJSON(BLOCKS_ENDPOINT, (raw) => {
+            const b = normalizeBlock(raw);
+            const key = `${b.slot}:${b.id}`;
+            if (seen.has(key)) { pruneAndPad(); return; }
+            seen.add(key);
+            appendBlockRow(b, key);
+        }, { signal: blocksController.signal }).catch(err => {
+            if (!blocksController.signal.aborted) console.error("Blocks stream error:", err);
+        });
     })();
 
-    // ---- Transactions ----
+    // ---- Transactions (kept simple placeholder; adapt to your API shape) ----
     (function initTxs() {
         const body = document.getElementById("txs-body");
         const counter = document.getElementById("txs-count");
         let n = 0;
-        ensureSize(body, 4); // 4 columns now
+        ensureSize(body, 4, TABLE_SIZE);
+
+        if (txsController) txsController.abort();
+        txsController = new AbortController();
+
         streamNDJSON(TXS_ENDPOINT, (t) => {
-            appendRow(body, [
-                { html: `<span class="mono" title="${t.hash}">${shortHex(t.hash, 10, 8)}</span>` },
-                { html: `<span class="mono" title="${t.sender}">${shortHex(t.sender)}</span> → <span class="mono" title="${t.recipient}">${shortHex(t.recipient)}</span>` },
-                { html: `<span class="amount">${Number(t.amount).toLocaleString(undefined, { maximumFractionDigits: 8 })}</span>` },
-                { html: `<span class="mono" title="${t.timestamp}">${fmtTime(t.timestamp)}</span>` },
-            ]);
-            counter.textContent = (++n).toString();
-        }).catch(err => console.error("Tx stream error:", err));
+            const tr = document.createElement("tr");
+            const td = (html) => { const x = document.createElement("td"); x.innerHTML = html; return x; };
+            tr.appendChild(td(`<span class="mono" title="${t.hash ?? ""}">${shortHex(t.hash ?? "")}</span>`));
+            tr.appendChild(td(`<span class="mono" title="${t.sender ?? ""}">${shortHex(t.sender ?? "")}</span> → <span class="mono" title="${t.recipient ?? ""}">${shortHex(t.recipient ?? "")}</span>`));
+            tr.appendChild(td(`<span class="amount">${(t.amount ?? 0).toLocaleString(undefined, { maximumFractionDigits: 8 })}</span>`));
+            tr.appendChild(td(`<span class="mono" title="${t.timestamp ?? ""}">${fmtTime(t.timestamp)}</span>`));
+            body.insertBefore(tr, body.firstChild);
+            while (body.rows.length > TABLE_SIZE) body.deleteRow(-1);
+            counter.textContent = String(++n);
+        }, { signal: txsController.signal }).catch(err => {
+            if (!txsController.signal.aborted) console.error("Tx stream error:", err);
+        });
     })();
 </script>
 </body>

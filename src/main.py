@@ -1,6 +1,7 @@
 import asyncio
 
 import uvicorn
+from dotenv import load_dotenv
 
 from app import create_app
 from logs import setup_logging
@@ -28,6 +29,7 @@ async def main():
 # Pycharm-Debuggable Uvicorn Server
 if __name__ == "__main__":
     try:
+        load_dotenv()
         setup_logging()
         asyncio.run(main())
     except KeyboardInterrupt:

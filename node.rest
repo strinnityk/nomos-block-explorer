@@ -1,0 +1,24 @@
+GET {{host}}/cryptarchia/info
+Accept: application/json
+
+###
+
+GET {{host}}/cryptarchia/headers
+Accept: application/json
+
+###
+
+GET {{host}}/network/info
+Accept: application/json
+
+###
+
+GET {{host}}/mantle/metrics
+
+###
+
+GET {{host}}/cryptarchia/blocks?slot_from=0&slot_to=10
+
+###
+
+GET {{host}}/cryptarchia/blocks/stream
