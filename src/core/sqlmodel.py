@@ -1,10 +1,44 @@
-from typing import Any, Generic, List, TypeVar
+import logging
+from typing import Any, Generic, List, Literal, TypeVar
 
 from pydantic import TypeAdapter
+from pydantic.config import ExtraValues
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.types import JSON as SA_JSON, TypeDecorator
 
 T = TypeVar("T")
+
+logger = logging.getLogger(__name__)
+
+
+class _TypeAdapter(TypeAdapter):  # type: ignore[misc]
+    def validate_json(
+        self,
+        data: str | bytes | bytearray,
+        /,
+        *,
+        strict: bool | None = None,
+        extra: ExtraValues | None = None,
+        context: Any | None = None,
+        experimental_allow_partial: bool | Literal["off", "on", "trailing-strings"] = False,
+        by_alias: bool | None = None,
+        by_name: bool | None = None,
+    ) -> T:
+        logger.warning(
+            """
+            Method `TypeAdapter::validate_json` is known to not deserialize JSON columns correctly under certain conditions.
+            For more context read `NbeModel::model_validate_json`'s pydoc.
+            """
+        )
+        return super().validate_json(
+            data,
+            strict=strict,
+            extra=extra,
+            context=context,
+            experimental_allow_partial=experimental_allow_partial,
+            by_alias=by_alias,
+            by_name=by_name,
+        )
 
 
 class PydanticJsonColumn(TypeDecorator, Generic[T]):
@@ -22,7 +56,7 @@ class PydanticJsonColumn(TypeDecorator, Generic[T]):
     def __init__(self, model: type[T], *, many: bool = False) -> None:
         super().__init__()
         self.many = many
-        self._ta = TypeAdapter(List[model] if many else model)
+        self._ta = _TypeAdapter(List[model] if many else model)
 
     # Use JSONB on Postgres, JSON elsewhere
     def load_dialect_impl(self, dialect):
