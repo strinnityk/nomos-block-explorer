@@ -1,6 +1,9 @@
+import logging
+import os
 import random
-from typing import List
+from typing import Any, List, Self
 
+from pydantic.config import ExtraValues
 from sqlalchemy import Column
 from sqlmodel import Field
 
@@ -8,6 +11,15 @@ from core.models import NbeSchema, TimestampedModel
 from core.sqlmodel import PydanticJsonColumn
 from node.models.transactions import Transaction
 from utils.random import random_hash
+
+
+def _is_debug__randomize_transactions():
+    is_debug = os.getenv("DEBUG", "False").lower() == "true"
+    is_debug__randomize_transactions = os.getenv("DEBUG__RANDOMIZE_TRANSACTIONS", "False").lower() == "true"
+    return is_debug and is_debug__randomize_transactions
+
+
+logger = logging.getLogger(__name__)
 
 
 class Public(NbeSchema):
@@ -84,7 +96,27 @@ class Block(TimestampedModel, table=True):
         return f"Block(slot={self.slot})"
 
     def __repr__(self) -> str:
-        return f"<Block(id={self.id}, created_at={self.created_at}, slot={self.slot}, parent={self.header['parent_block']})>"
+        return f"<Block(id={self.id}, created_at={self.created_at}, slot={self.slot}, parent={self.header["parent_block"]})>"
+
+    @classmethod
+    def model_validate_json(
+        cls,
+        json_data: str | bytes | bytearray,
+        *,
+        strict: bool | None = None,
+        extra: ExtraValues | None = None,
+        context: Any | None = None,
+        by_alias: bool | None = None,
+        by_name: bool | None = None,
+    ) -> Self:
+        self = super().model_validate_json(
+            json_data, strict=strict, extra=extra, context=context, by_alias=by_alias, by_name=by_name
+        )
+        if _is_debug__randomize_transactions():
+            logger.debug("DEBUG and DEBUG__RANDOMIZE_TRANSACTIONS is enabled, randomizing Block's transactions.")
+            n = 0 if random.randint(0, 1) <= 0.5 else random.randint(1, 10)
+            self.transactions = [Transaction.from_random() for _ in range(n)]
+        return self
 
     @classmethod
     def from_random(cls, slot_from: int = 1, slot_to: int = 100) -> "Block":
