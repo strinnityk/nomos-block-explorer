@@ -1,318 +1,35 @@
 <!doctype html>
 <html lang="en">
-<head>
-    <meta charset="utf-8" />
-    <title>Nomos Block Explorer</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <style>
-        :root {
-            --bg:#0b0e14; --card:#131722; --fg:#e6edf3; --muted:#9aa4ad;
-            --accent:#3fb950; --warn:#ffb86b;
-        }
-        * { box-sizing: border-box; }
-        body { margin:0; font:14px/1.4 system-ui,sans-serif; background:var(--bg); color:var(--fg); }
-        header { display:flex; gap:12px; align-items:center; padding:14px 16px; background:#0e1320; position: sticky; top:0; }
-        h1 { font-size:16px; margin:0; }
-        .pill { padding:4px 8px; border-radius:999px; background:#1b2133; color:var(--muted); font-size:12px; }
-        .pill.online { background: rgba(63,185,80,.15); color: var(--accent); }
-        .pill.offline { background: rgba(255,184,107,.15); color: var(--warn); }
-        .flash { animation: flash 700ms ease-out; }
-        @keyframes flash { from { box-shadow:0 0 0 0 rgba(63,185,80,.9) } to { box-shadow:0 0 0 14px rgba(63,185,80,0) } }
-        main { max-width: 1400px; margin: 20px auto; padding: 0 16px 40px; }
-        .card { background: var(--card); border: 1px solid #20263a; border-radius: 10px; overflow: hidden; }
-        .card-header { display:flex; justify-content:space-between; align-items:center; padding:12px 14px; border-bottom: 1px solid #1f2435; }
+    <head>
+        <title>Nomos Block Explorer</title>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="description" content="Lightweight Nomos block Explorer UI" />
 
-        .table-wrapper { overflow: auto; -webkit-overflow-scrolling: touch; max-height: 60vh; scrollbar-gutter: stable both-edges; padding-right: 8px; }
-        table { border-collapse: collapse; table-layout: fixed; width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-        .table-wrapper .table--blocks { min-width: 860px; }
-        .table-wrapper .table--txs    { min-width: 980px; }
+        <!-- Styles -->
+        <link rel="stylesheet" href="/static/styles.css" />
 
-        th, td { text-align:left; padding:8px 10px; border-bottom:1px solid #1f2435; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: top; }
-        th { color: var(--muted); font-weight: normal; font-size: 13px; position: sticky; top: 0; background: var(--card); z-index: 1; }
-        tbody td { height: 28px; }
-        tr:nth-child(odd) { background: #121728; }
+        <!-- Speed up first connection to ESM CDN -->
+        <link rel="dns-prefetch" href="https://esm.sh" />
+        <link rel="preconnect" href="https://esm.sh" crossorigin />
 
-        .twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 16px; }
-        @media (max-width: 960px) { .twocol { grid-template-columns: 1fr; } }
-
-        .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-        .amount { font-variant-numeric: tabular-nums; }
-        .linkish { color: var(--fg); text-decoration: none; border-bottom: 1px dotted #2a3350; }
-        .linkish:hover { border-bottom-color: var(--fg); }
-
-        /* Placeholder rows for fixed table height */
-        tr.ph td { opacity: .35; }
-    </style>
-</head>
-<body>
-<header>
-    <h1>Nomos Block Explorer</h1>
-    <span id="status-pill" class="pill">Connecting…</span>
-</header>
-
-<main>
-    <section class="twocol">
-        <!-- Blocks -->
-        <div class="card">
-            <div class="card-header">
-                <div><strong>Blocks</strong> <span class="pill" id="blocks-count">0</span></div>
-                <div style="color:var(--muted); font-size:12px;">/api/v1/blocks/stream</div>
-            </div>
-            <div class="table-wrapper">
-                <table class="table--blocks">
-                    <colgroup>
-                        <col style="width:90px" />    <!-- Slot -->
-                        <col style="width:260px" />   <!-- Block Root -->
-                        <col style="width:260px" />   <!-- Parent -->
-                        <col style="width:80px" />    <!-- Txs -->
-                        <col style="width:180px" />   <!-- Time -->
-                    </colgroup>
-                    <thead>
-                    <tr>
-                        <th>Slot</th>
-                        <th>Block Root</th>
-                        <th>Parent</th>
-                        <th>Txs</th>
-                        <th>Time</th>
-                    </tr>
-                    </thead>
-                    <tbody id="blocks-body"></tbody>
-                </table>
-            </div>
-        </div>
-
-        <!-- Transactions -->
-        <div class="card">
-            <div class="card-header">
-                <div><strong>Transactions</strong> <span class="pill" id="txs-count">0</span></div>
-                <div style="color:var(--muted); font-size:12px;">/api/v1/transactions/stream</div>
-            </div>
-            <div class="table-wrapper">
-                <table class="table--txs">
-                    <colgroup>
-                        <col style="width:260px" />
-                        <col />
-                        <col style="width:120px" />
-                        <col style="width:180px" />
-                    </colgroup>
-                    <thead>
-                    <tr>
-                        <th>Hash</th>
-                        <th>From → To</th>
-                        <th>Amount</th>
-                        <th>Time</th>
-                    </tr>
-                    </thead>
-                    <tbody id="txs-body"></tbody>
-                </table>
-            </div>
-        </div>
-    </section>
-</main>
-
-<script>
-    const API_PREFIX = "/api/v1";
-    const HEALTH_ENDPOINT = `${API_PREFIX}/health/stream`;
-    const BLOCKS_ENDPOINT = `${API_PREFIX}/blocks/stream`;
-    const TXS_ENDPOINT = `${API_PREFIX}/transactions/stream`;
-    const TABLE_SIZE = 10;
-
-    // ------------------ RELOAD/UNLOAD ABORT PATCH (prevents “Error in input stream”) ------------------
-    // We keep AbortControllers for each stream and abort them when the page unloads/reloads,
-    // so the fetch ReadableStreams don't throw TypeError during navigation.
-    let healthController = null;
-    let blocksController = null;
-    let txsController = null;
-    addEventListener("beforeunload", () => {
-        healthController?.abort();
-        blocksController?.abort();
-        txsController?.abort();
-    }, { passive: true });
-    addEventListener("pagehide", () => {
-        healthController?.abort();
-        blocksController?.abort();
-        txsController?.abort();
-    }, { passive: true });
-    // --------------------------------------------------------------------------------------------------
-
-    // ---- Health pill ----
-    const pill = document.getElementById("status-pill");
-    let state = "connecting";
-    function setState(next) {
-        if (next === state) return;
-        state = next;
-        pill.className = "pill";
-        if (state === "online") { pill.textContent = "Online"; pill.classList.add("online","flash"); }
-        else if (state === "offline") { pill.textContent = "Offline"; pill.classList.add("offline","flash"); }
-        else { pill.textContent = "Connecting…"; }
-        setTimeout(() => pill.classList.remove("flash"), 750);
-    }
-    function applyHealth(obj) { if (typeof obj?.healthy === "boolean") setState(obj.healthy ? "online" : "offline"); }
-    async function connectHealth() {
-        if (healthController) healthController.abort();
-        healthController = new AbortController();
-        setState("connecting");
-        try {
-            const res = await fetch(HEALTH_ENDPOINT, { signal: healthController.signal, cache: "no-cache" });
-            if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
-            const reader = res.body.getReader(); const decoder = new TextDecoder(); let buf = "";
-            while (true) {
-                let chunk;
-                try { chunk = await reader.read(); } catch { if (healthController.signal.aborted) return; else break; }
-                const { value, done } = chunk; if (done) break;
-                buf += decoder.decode(value, { stream: true });
-                const lines = buf.split("\n"); buf = lines.pop() ?? "";
-                for (const line of lines) { if (!line.trim()) continue; try { applyHealth(JSON.parse(line)); } catch {} }
+        <!-- Import map must appear BEFORE any modulepreload that relies on it -->
+        <script type="importmap">
+            {
+                "imports": {
+                    "preact": "https://esm.sh/preact@10.22.0",
+                    "preact/hooks": "https://esm.sh/preact@10.22.0/hooks"
+                }
             }
-        } catch (e) { if (!healthController?.signal.aborted) setState("offline"); }
-    }
-    connectHealth();
+        </script>
 
-    // ---- NDJSON reader (shared) ----
-    async function streamNDJSON(url, onItem, { signal } = {}) {
-        const res = await fetch(url, { headers: { "accept": "application/x-ndjson" }, signal, cache: "no-cache" });
-        if (!res.ok || !res.body) throw new Error(`Stream failed: ${res.status}`);
-        const reader = res.body.getReader(); const decoder = new TextDecoder(); let buf = "";
-        while (true) {
-            let chunk;
-            try { chunk = await reader.read(); }
-            catch { if (signal?.aborted) return; else break; } // quiet on navigation abort
-            const { value, done } = chunk; if (done) break;
-            buf += decoder.decode(value, { stream: true });
-            let idx;
-            while ((idx = buf.indexOf("\n")) >= 0) {
-                const line = buf.slice(0, idx).trim(); buf = buf.slice(idx + 1);
-                if (!line) continue;
-                try { onItem(JSON.parse(line)); } catch {}
-            }
-        }
-        const last = buf.trim(); if (last) { try { onItem(JSON.parse(last)); } catch {} }
-    }
-
-    // ---- Helpers ----
-    function shortHex(s, left = 10, right = 8) {
-        if (!s) return "";
-        return s.length <= left + right + 1 ? s : `${s.slice(0,left)}…${s.slice(-right)}`;
-    }
-    function fmtTime(ts) {
-        if (ts == null) return "";
-        let d = typeof ts === "number" ? new Date(ts < 1e12 ? ts * 1000 : ts) : new Date(ts);
-        if (isNaN(d)) return "";
-        return d.toLocaleString(undefined, {
-            year: "numeric", month: "2-digit", day: "2-digit",
-            hour: "2-digit", minute: "2-digit", second: "2-digit"
-        });
-    }
-
-    // Keep table exactly TABLE_SIZE rows using placeholders
-    function ensureSize(tbody, cols, size) {
-        // remove existing placeholders first
-        for (let i = tbody.rows.length - 1; i >= 0; i--) {
-            if (tbody.rows[i].classList.contains("ph")) tbody.deleteRow(i);
-        }
-        let real = tbody.rows.length;
-        // pad
-        for (let i = 0; i < size - real; i++) {
-            const tr = document.createElement("tr"); tr.className = "ph";
-            for (let c = 0; c < cols; c++) { const td = document.createElement("td"); td.innerHTML = "&nbsp;"; tr.appendChild(td); }
-            tbody.appendChild(tr);
-        }
-    }
-
-    // ---- Blocks (dedupe by slot:id + fixed-size table) ----
-    (function initBlocks() {
-        const body = document.getElementById("blocks-body");
-        const counter = document.getElementById("blocks-count");
-        const seen = new Set(); // keys "slot:id"
-
-        function pruneAndPad() {
-            // remove placeholders
-            for (let i = body.rows.length - 1; i >= 0; i--) if (body.rows[i].classList.contains("ph")) body.deleteRow(i);
-            // cap real rows and drop keys for removed rows
-            while ([...body.rows].filter(r => !r.classList.contains("ph")).length > TABLE_SIZE) {
-                const last = body.rows[body.rows.length - 1];
-                const key = last?.dataset?.key;
-                if (key) seen.delete(key);
-                body.deleteRow(-1);
-            }
-            // pad back to TABLE_SIZE
-            const real = [...body.rows].filter(r => !r.classList.contains("ph")).length;
-            for (let i = 0; i < TABLE_SIZE - real; i++) {
-                const tr = document.createElement("tr"); tr.className = "ph";
-                for (let c = 0; c < 5; c++) { const td = document.createElement("td"); td.innerHTML = "&nbsp;"; tr.appendChild(td); }
-                body.appendChild(tr);
-            }
-            counter.textContent = String(real);
-        }
-
-        function appendBlockRow(b, key) {
-            const tr = document.createElement("tr");
-            tr.dataset.key = key;
-            const td = (html) => { const x = document.createElement("td"); x.innerHTML = html; return x; };
-            tr.appendChild(td(`<span class="mono">${b.slot}</span>`));
-            tr.appendChild(td(`<span class="mono" title="${b.root}">${shortHex(b.root)}</span>`));
-            tr.appendChild(td(`<span class="mono" title="${b.parent}">${shortHex(b.parent)}</span>`));
-            tr.appendChild(td(`<span class="mono">${b.txCount}</span>`));
-            tr.appendChild(td(`<span class="mono" title="${b.time ?? ""}">${fmtTime(b.time)}</span>`));
-            body.insertBefore(tr, body.firstChild);
-            pruneAndPad();
-        }
-
-        function normalizeBlock(raw) {
-            const h = raw.header ?? raw;
-            const created = raw.created_at ?? raw.header?.created_at ?? null;
-            return {
-                id: Number(raw.id ?? 0),     // include id for (slot,id) dedupe
-                slot: Number(h?.slot ?? raw.slot ?? 0),
-                root: h?.block_root ?? raw.block_root ?? "",
-                parent: h?.parent_block ?? raw.parent_block ?? "",
-                txCount: Array.isArray(raw.transactions) ? raw.transactions.length
-                    : (typeof raw.transaction_count === "number" ? raw.transaction_count : 0),
-                time: created
-            };
-        }
-
-        ensureSize(body, 5, TABLE_SIZE);
-
-        // start stream (with reload-abort controller)
-        if (blocksController) blocksController.abort();
-        blocksController = new AbortController();
-
-        streamNDJSON(BLOCKS_ENDPOINT, (raw) => {
-            const b = normalizeBlock(raw);
-            const key = `${b.slot}:${b.id}`;
-            if (seen.has(key)) { pruneAndPad(); return; }
-            seen.add(key);
-            appendBlockRow(b, key);
-        }, { signal: blocksController.signal }).catch(err => {
-            if (!blocksController.signal.aborted) console.error("Blocks stream error:", err);
-        });
-    })();
-
-    // ---- Transactions (kept simple placeholder; adapt to your API shape) ----
-    (function initTxs() {
-        const body = document.getElementById("txs-body");
-        const counter = document.getElementById("txs-count");
-        let n = 0;
-        ensureSize(body, 4, TABLE_SIZE);
-
-        if (txsController) txsController.abort();
-        txsController = new AbortController();
-
-        streamNDJSON(TXS_ENDPOINT, (t) => {
-            const tr = document.createElement("tr");
-            const td = (html) => { const x = document.createElement("td"); x.innerHTML = html; return x; };
-            tr.appendChild(td(`<span class="mono" title="${t.hash ?? ""}">${shortHex(t.hash ?? "")}</span>`));
-            tr.appendChild(td(`<span class="mono" title="${t.sender ?? ""}">${shortHex(t.sender ?? "")}</span> → <span class="mono" title="${t.recipient ?? ""}">${shortHex(t.recipient ?? "")}</span>`));
-            tr.appendChild(td(`<span class="amount">${(t.amount ?? 0).toLocaleString(undefined, { maximumFractionDigits: 8 })}</span>`));
-            tr.appendChild(td(`<span class="mono" title="${t.timestamp ?? ""}">${fmtTime(t.timestamp)}</span>`));
-            body.insertBefore(tr, body.firstChild);
-            while (body.rows.length > TABLE_SIZE) body.deleteRow(-1);
-            counter.textContent = String(++n);
-        }, { signal: txsController.signal }).catch(err => {
-            if (!txsController.signal.aborted) console.error("Tx stream error:", err);
-        });
-    })();
-</script>
-</body>
+        <!-- Safe to preload after the import map -->
+        <link rel="modulepreload" href="/static/app.js" />
+        <link rel="modulepreload" href="https://esm.sh/preact@10.22.0" crossorigin />
+        <link rel="modulepreload" href="https://esm.sh/preact@10.22.0/hooks" crossorigin />
+    </head>
+    <body>
+        <div id="app"></div>
+        <script type="module" src="/static/app.js"></script>
+    </body>
 </html>
