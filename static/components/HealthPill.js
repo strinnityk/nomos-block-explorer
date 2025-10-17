@@ -1,7 +1,7 @@
 import { h } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { HEALTH_ENDPOINT } from '../lib/api.js';
-import { streamNdjson } from '../lib/utils.js';
+import {streamNdjson, withBenignFilter} from '../lib/utils.js';
 
 const STATUS = {
     CONNECTING: 'connecting',
@@ -12,7 +12,7 @@ const STATUS = {
 export default function HealthPill() {
     const [status, setStatus] = useState(STATUS.CONNECTING);
     const pillRef = useRef(null);
-    const controllerRef = useRef(null);
+    const abortRef = useRef(null);
 
     // Flash animation whenever status changes
     useEffect(() => {
@@ -24,8 +24,8 @@ export default function HealthPill() {
     }, [status]);
 
     useEffect(() => {
-        controllerRef.current?.abort();
-        controllerRef.current = new AbortController();
+        abortRef.current?.abort();
+        abortRef.current = new AbortController();
 
         streamNdjson(
             HEALTH_ENDPOINT,
@@ -35,18 +35,20 @@ export default function HealthPill() {
                 }
             },
             {
-                signal: controllerRef.current.signal,
-                onStart: () => setStatus(STATUS.CONNECTING),
-                onError: (err) => {
-                    if (!controllerRef.current.signal.aborted) {
-                        console.error('Health stream error:', err);
-                        setStatus(STATUS.OFFLINE);
-                    }
-                },
+                signal: abortRef.current.signal,
+                onError: withBenignFilter(
+                    (err) => {
+                        if (!abortRef.current.signal.aborted) {
+                            console.error('Health stream error:', err);
+                            setStatus(STATUS.OFFLINE);
+                        }
+                    },
+                    abortRef.current.signal
+                ),
             },
         );
 
-        return () => controllerRef.current?.abort();
+        return () => abortRef.current?.abort();
     }, []);
 
     const className = 'pill ' + (status === STATUS.ONLINE ? 'online' : status === STATUS.OFFLINE ? 'offline' : '');

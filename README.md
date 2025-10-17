@@ -18,7 +18,6 @@
 - Get transaction by id
 - Get block by id
 - Block viewer
-- htm
 - Transaction viewer
-- When requesting stream, querystring for number of prefetched blocks
-- Show transaction
+- htm
+- Show transactions in table

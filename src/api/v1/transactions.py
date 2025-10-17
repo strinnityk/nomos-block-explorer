@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import List
 
+from fastapi import Query
 from starlette.responses import Response
 
 from api.streams import into_ndjson_stream
@@ -9,10 +10,16 @@ from node.models.transactions import Transaction
 from utils.datetime import increment_datetime
 
 
-async def stream(request: NBERequest) -> Response:
-    bootstrap_transactions: List[Transaction] = await request.app.state.transaction_repository.get_latest(
-        limit=5, descending=False
+async def _prefetch_transactions(request: NBERequest, prefetch_limit: int) -> List[Transaction]:
+    return (
+        []
+        if prefetch_limit == 0 else
+        await request.app.state.transaction_repository.get_latest(limit=prefetch_limit, descending=False)
     )
+
+
+async def stream(request: NBERequest, prefetch_limit: int = Query(0, alias="prefetch-limit", ge=0)) -> Response:
+    bootstrap_transactions: List[Transaction] = await _prefetch_transactions(request, prefetch_limit)
     highest_timestamp: datetime = max(
         (transaction.timestamp for transaction in bootstrap_transactions), default=datetime.min
     )

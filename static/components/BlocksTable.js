@@ -1,106 +1,86 @@
 import { h } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';
-import { BLOCKS_ENDPOINT, TABLE_SIZE } from '../lib/api.js';
-import { streamNdjson, ensureFixedRowCount, shortenHex, formatTimestamp } from '../lib/utils.js';
-
-const COLUMN_COUNT = 5;
+import { BLOCKS_ENDPOINT, TABLE_SIZE } from '../lib/api.js?dev=1';
+import {streamNdjson, ensureFixedRowCount, shortenHex, formatTimestamp, withBenignFilter} from '../lib/utils.js?dev=1';
 
 export default function BlocksTable() {
     const tbodyRef = useRef(null);
-    const counterRef = useRef(null);
-    const controllerRef = useRef(null);
+    const countRef = useRef(null);
+    const abortRef = useRef(null);
     const seenKeysRef = useRef(new Set());
 
     useEffect(() => {
         const tbody = tbodyRef.current;
-        const counter = counterRef.current;
+        const counter = countRef.current;
+        ensureFixedRowCount(tbody, 5, TABLE_SIZE);
 
-        ensureFixedRowCount(tbody, COLUMN_COUNT, TABLE_SIZE);
+        abortRef.current?.abort();
+        abortRef.current = new AbortController();
 
-        controllerRef.current?.abort();
-        controllerRef.current = new AbortController();
-
-        function updateCounter() {
-            let realRows = 0;
-            for (const row of tbody.rows) {
-                if (!row.classList.contains('ph')) realRows++;
-            }
-            counter.textContent = String(realRows);
-        }
-
-        function removePlaceholders() {
+        function pruneAndPad() {
+            // remove placeholders
             for (let i = tbody.rows.length - 1; i >= 0; i--) {
                 if (tbody.rows[i].classList.contains('ph')) tbody.deleteRow(i);
             }
-        }
-
-        function trimToTableSize() {
-            // count real rows
-            let realRows = 0;
-            for (const row of tbody.rows) {
-                if (!row.classList.contains('ph')) realRows++;
-            }
-            // drop rows beyond limit, and forget their keys
-            while (realRows > TABLE_SIZE) {
+            // trim overflow
+            while ([...tbody.rows].filter((r) => !r.classList.contains('ph')).length > TABLE_SIZE) {
                 const last = tbody.rows[tbody.rows.length - 1];
                 const key = last?.dataset?.key;
                 if (key) seenKeysRef.current.delete(key);
                 tbody.deleteRow(-1);
-                realRows--;
             }
+            // pad placeholders
+            const real = [...tbody.rows].filter((r) => !r.classList.contains('ph')).length;
+            ensureFixedRowCount(tbody, 5, TABLE_SIZE);
+            counter.textContent = String(real);
         }
 
-        function makeLink(href, text, title) {
-            const anchor = document.createElement('a');
-            anchor.className = 'linkish mono';
-            anchor.href = href;
-            if (title) anchor.title = title;
-            anchor.textContent = text;
-            return anchor;
-        }
+        const makeLink = (href, text, title) => {
+            const a = document.createElement('a');
+            a.className = 'linkish mono';
+            a.href = href;
+            if (title) a.title = title;
+            a.textContent = text;
+            return a;
+        };
 
-        function appendRow(block, key) {
+        const appendRow = (block, key) => {
             const row = document.createElement('tr');
             row.dataset.key = key;
 
-            const slotCell = document.createElement('td');
-            const slotSpan = document.createElement('span');
-            slotSpan.className = 'mono';
-            slotSpan.textContent = String(block.slot);
-            slotCell.appendChild(slotSpan);
+            const cellSlot = document.createElement('td');
+            const spanSlot = document.createElement('span');
+            spanSlot.className = 'mono';
+            spanSlot.textContent = String(block.slot);
+            cellSlot.appendChild(spanSlot);
 
-            const rootCell = document.createElement('td');
-            rootCell.appendChild(makeLink(`/block/${block.root}`, shortenHex(block.root), block.root));
+            const cellRoot = document.createElement('td');
+            cellRoot.appendChild(makeLink(`/block/${block.root}`, shortenHex(block.root), block.root));
 
-            const parentCell = document.createElement('td');
-            parentCell.appendChild(makeLink(`/block/${block.parent}`, shortenHex(block.parent), block.parent));
+            const cellParent = document.createElement('td');
+            cellParent.appendChild(makeLink(`/block/${block.parent}`, shortenHex(block.parent), block.parent));
 
-            const countCell = document.createElement('td');
-            const countSpan = document.createElement('span');
-            countSpan.className = 'mono';
-            countSpan.textContent = String(block.transactionCount);
-            countCell.appendChild(countSpan);
+            const cellTxCount = document.createElement('td');
+            const spanTx = document.createElement('span');
+            spanTx.className = 'mono';
+            spanTx.textContent = String(block.transactionCount);
+            cellTxCount.appendChild(spanTx);
 
-            const timeCell = document.createElement('td');
-            const timeSpan = document.createElement('span');
-            timeSpan.className = 'mono';
-            timeSpan.title = block.time ?? '';
-            timeSpan.textContent = formatTimestamp(block.time);
-            timeCell.appendChild(timeSpan);
+            const cellTime = document.createElement('td');
+            const spanTime = document.createElement('span');
+            spanTime.className = 'mono';
+            spanTime.title = block.time ?? '';
+            spanTime.textContent = formatTimestamp(block.time);
+            cellTime.appendChild(spanTime);
 
-            row.append(slotCell, rootCell, parentCell, countCell, timeCell);
+            row.append(cellSlot, cellRoot, cellParent, cellTxCount, cellTime);
             tbody.insertBefore(row, tbody.firstChild);
+            pruneAndPad();
+        };
 
-            // housekeeping
-            removePlaceholders();
-            trimToTableSize();
-            ensureFixedRowCount(tbody, COLUMN_COUNT, TABLE_SIZE);
-            updateCounter();
-        }
-
-        function normalizeBlock(raw) {
+        const normalize = (raw) => {
             const header = raw.header ?? raw;
-            const createdAt = raw.created_at ?? raw.header?.created_at ?? null;
+            const created = raw.created_at ?? raw.header?.created_at ?? null;
             return {
                 id: Number(raw.id ?? 0),
                 slot: Number(header?.slot ?? raw.slot ?? 0),
@@ -109,39 +89,37 @@ export default function BlocksTable() {
                 transactionCount: Array.isArray(raw.transactions)
                     ? raw.transactions.length
                     : typeof raw.transaction_count === 'number'
-                      ? raw.transaction_count
-                      : 0,
-                time: createdAt,
+                        ? raw.transaction_count
+                        : 0,
+                time: created,
             };
-        }
+        };
 
+        const url = `${BLOCKS_ENDPOINT}?prefetch-limit=${encodeURIComponent(TABLE_SIZE)}`;
         streamNdjson(
-            BLOCKS_ENDPOINT,
+            url,
             (raw) => {
-                const block = normalizeBlock(raw);
+                const block = normalize(raw);
                 const key = `${block.slot}:${block.id}`;
                 if (seenKeysRef.current.has(key)) {
-                    // still keep placeholders consistent and counter fresh
-                    removePlaceholders();
-                    trimToTableSize();
-                    ensureFixedRowCount(tbody, COLUMN_COUNT, TABLE_SIZE);
-                    updateCounter();
+                    pruneAndPad();
                     return;
                 }
                 seenKeysRef.current.add(key);
                 appendRow(block, key);
             },
             {
-                signal: controllerRef.current.signal,
-                onError: (err) => {
-                    if (!controllerRef.current.signal.aborted) {
-                        console.error('Blocks stream error:', err);
-                    }
-                },
+                signal: abortRef.current.signal,
+                onError: withBenignFilter(
+                    (e) => console.error('Blocks stream error:', e),
+                    abortRef.current.signal
+                )
             },
-        );
+        ).catch((err) => {
+            if (!abortRef.current.signal.aborted) console.error('Blocks stream error:', err);
+        });
 
-        return () => controllerRef.current?.abort();
+        return () => abortRef.current?.abort();
     }, []);
 
     return h(
@@ -150,8 +128,8 @@ export default function BlocksTable() {
         h(
             'div',
             { class: 'card-header' },
-            h('div', null, h('strong', null, 'Blocks '), h('span', { class: 'pill', ref: counterRef }, '0')),
-            h('div', { style: 'color:var(--muted); font-size:12px;' }, BLOCKS_ENDPOINT),
+            h('div', null, h('strong', null, 'Blocks '), h('span', { class: 'pill', ref: countRef }, '0')),
+            h('div', { style: 'color:var(--muted); font-size:12px;' }, '/api/v1/blocks/stream'),
         ),
         h(
             'div',
@@ -171,15 +149,7 @@ export default function BlocksTable() {
                 h(
                     'thead',
                     null,
-                    h(
-                        'tr',
-                        null,
-                        h('th', null, 'Slot'),
-                        h('th', null, 'Block Root'),
-                        h('th', null, 'Parent'),
-                        h('th', null, 'Transactions'),
-                        h('th', null, 'Time'),
-                    ),
+                    h('tr', null, h('th', null, 'Slot'), h('th', null, 'Block Root'), h('th', null, 'Parent'), h('th', null, 'Transactions'), h('th', null, 'Time')),
                 ),
                 h('tbody', { ref: tbodyRef }),
             ),

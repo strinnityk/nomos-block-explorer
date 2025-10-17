@@ -1,99 +1,77 @@
 import { h } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';
 import { TRANSACTIONS_ENDPOINT, TABLE_SIZE } from '../lib/api.js?dev=1';
-import { streamNdjson, ensureFixedRowCount, shortenHex, formatTimestamp } from '../lib/utils.js?dev=1';
+import {streamNdjson, ensureFixedRowCount, shortenHex, formatTimestamp, withBenignFilter} from '../lib/utils.js?dev=1';
 
 export default function TransactionsTable() {
-    const tableBodyRef = useRef(null);
-    const totalCountPillRef = useRef(null);
-    const abortControllerRef = useRef(null);
-    const totalStreamedCountRef = useRef(0);
+    const tbodyRef = useRef(null);
+    const countRef = useRef(null);
+    const abortRef = useRef(null);
+    const totalCountRef = useRef(0);
 
     useEffect(() => {
-        const tableBody = tableBodyRef.current;
-        const totalCountPill = totalCountPillRef.current;
-        const PLACEHOLDER_CLASS = 'ph';
+        const tbody = tbodyRef.current;
+        const counter = countRef.current;
+        ensureFixedRowCount(tbody, 4, TABLE_SIZE);
 
-        ensureFixedRowCount(tableBody, 4, TABLE_SIZE);
+        abortRef.current?.abort();
+        abortRef.current = new AbortController();
 
-        abortControllerRef.current?.abort();
-        abortControllerRef.current = new AbortController();
-
-        const createSpan = (className, textContent, title) => {
-            const element = document.createElement('span');
-            if (className) element.className = className;
-            if (title) element.title = title;
-            element.textContent = textContent;
-            return element;
+        const makeSpan = (className, text, title) => {
+            const s = document.createElement('span');
+            if (className) s.className = className;
+            if (title) s.title = title;
+            s.textContent = text;
+            return s;
+        };
+        const makeLink = (href, text, title) => {
+            const a = document.createElement('a');
+            a.className = 'linkish mono';
+            a.href = href;
+            if (title) a.title = title;
+            a.textContent = text;
+            return a;
         };
 
-        const createLink = (href, textContent, title) => {
-            const element = document.createElement('a');
-            element.className = 'linkish mono';
-            element.href = href;
-            if (title) element.title = title;
-            element.textContent = textContent;
-            return element;
-        };
+        const url = `${TRANSACTIONS_ENDPOINT}?prefetch-limit=${encodeURIComponent(TABLE_SIZE)}`;
+        streamNdjson(
+            url,
+            (t) => {
+                const row = document.createElement('tr');
 
-        const countNonPlaceholderRows = () =>
-            [...tableBody.rows].filter((row) => !row.classList.contains(PLACEHOLDER_CLASS)).length;
+                const cellHash = document.createElement('td');
+                cellHash.appendChild(makeLink(`/transaction/${t.hash ?? ''}`, shortenHex(t.hash ?? ''), t.hash ?? ''));
 
-        const appendTransactionRow = (transaction) => {
-            // Trim one placeholder from the end to keep height stable
-            const lastRow = tableBody.rows[tableBody.rows.length - 1];
-            if (lastRow?.classList.contains(PLACEHOLDER_CLASS)) tableBody.deleteRow(-1);
+                const cellFromTo = document.createElement('td');
+                cellFromTo.appendChild(makeSpan('mono', shortenHex(t.sender ?? ''), t.sender ?? ''));
+                cellFromTo.appendChild(document.createTextNode(' \u2192 '));
+                cellFromTo.appendChild(makeSpan('mono', shortenHex(t.recipient ?? ''), t.recipient ?? ''));
 
-            const row = document.createElement('tr');
+                const cellAmount = document.createElement('td');
+                cellAmount.className = 'amount';
+                cellAmount.textContent = Number(t.amount ?? 0).toLocaleString(undefined, { maximumFractionDigits: 8 });
 
-            const cellHash = document.createElement('td');
-            cellHash.appendChild(
-                createLink(
-                    `/transaction/${transaction.hash ?? ''}`,
-                    shortenHex(transaction.hash ?? ''),
-                    transaction.hash ?? '',
-                ),
-            );
+                const cellTime = document.createElement('td');
+                const spanTime = makeSpan('mono', formatTimestamp(t.timestamp), t.timestamp ?? '');
+                cellTime.appendChild(spanTime);
 
-            const cellSenderRecipient = document.createElement('td');
-            cellSenderRecipient.appendChild(
-                createSpan('mono', shortenHex(transaction.sender ?? ''), transaction.sender ?? ''),
-            );
-            cellSenderRecipient.appendChild(document.createTextNode(' \u2192 '));
-            cellSenderRecipient.appendChild(
-                createSpan('mono', shortenHex(transaction.recipient ?? ''), transaction.recipient ?? ''),
-            );
-
-            const cellAmount = document.createElement('td');
-            cellAmount.className = 'amount';
-            const amount = Number(transaction.amount ?? 0);
-            cellAmount.textContent = Number.isFinite(amount)
-                ? amount.toLocaleString(undefined, { maximumFractionDigits: 8 })
-                : '—';
-
-            const cellTime = document.createElement('td');
-            cellTime.appendChild(
-                createSpan('mono', formatTimestamp(transaction.timestamp), transaction.timestamp ?? ''),
-            );
-
-            row.append(cellHash, cellSenderRecipient, cellAmount, cellTime);
-            tableBody.insertBefore(row, tableBody.firstChild);
-
-            // Trim to TABLE_SIZE (counting only non-placeholder rows)
-            while (countNonPlaceholderRows() > TABLE_SIZE) tableBody.deleteRow(-1);
-
-            totalCountPill.textContent = String(++totalStreamedCountRef.current);
-        };
-
-        streamNdjson(TRANSACTIONS_ENDPOINT, (transaction) => appendTransactionRow(transaction), {
-            signal: abortControllerRef.current.signal,
-        }).catch((error) => {
-            if (!abortControllerRef.current.signal.aborted) {
-                console.error('Transactions stream error:', error);
-            }
+                row.append(cellHash, cellFromTo, cellAmount, cellTime);
+                tbody.insertBefore(row, tbody.firstChild);
+                while (tbody.rows.length > TABLE_SIZE) tbody.deleteRow(-1);
+                counter.textContent = String(++totalCountRef.current);
+            },
+            {
+                signal: abortRef.current.signal,
+                onError: withBenignFilter(
+                    (e) => console.error('Transaction stream error:', e),
+                    abortRef.current.signal
+                )
+            },
+        ).catch((err) => {
+            if (!abortRef.current.signal.aborted) console.error('Transactions stream error:', err);
         });
 
-        return () => abortControllerRef.current?.abort();
+        return () => abortRef.current?.abort();
     }, []);
 
     return h(
@@ -102,12 +80,7 @@ export default function TransactionsTable() {
         h(
             'div',
             { class: 'card-header' },
-            h(
-                'div',
-                null,
-                h('strong', null, 'Transactions '),
-                h('span', { class: 'pill', ref: totalCountPillRef }, '0'),
-            ),
+            h('div', null, h('strong', null, 'Transactions '), h('span', { class: 'pill', ref: countRef }, '0')),
             h('div', { style: 'color:var(--muted); font-size:12px;' }, '/api/v1/transactions/stream'),
         ),
         h(
@@ -127,16 +100,9 @@ export default function TransactionsTable() {
                 h(
                     'thead',
                     null,
-                    h(
-                        'tr',
-                        null,
-                        h('th', null, 'Hash'),
-                        h('th', null, 'From → To'),
-                        h('th', null, 'Amount'),
-                        h('th', null, 'Time'),
-                    ),
+                    h('tr', null, h('th', null, 'Hash'), h('th', null, 'From → To'), h('th', null, 'Amount'), h('th', null, 'Time')),
                 ),
-                h('tbody', { ref: tableBodyRef }),
+                h('tbody', { ref: tbodyRef }),
             ),
         ),
     );
