@@ -1,0 +1,60 @@
+import { h, render, Fragment } from 'preact';
+
+import Router from './components/Router.js?dev=1';
+import HealthPill from './components/HealthPill.js?dev=1';
+
+import HomePage from './pages/Home.js?dev=1';
+import BlockDetailPage from './pages/BlockDetail.js?dev=1';
+import TransactionDetailPage from './pages/TransactionDetail.js?dev=1';
+
+const ROOT = document.getElementById('app');
+
+function LoadingScreen() {
+    return h('main', { class: 'wrap' }, h('p', null, 'Loading...'));
+}
+
+function AppShell(props) {
+    return h(
+        Fragment,
+        null,
+        h('header', null, h('h1', null, 'Nomos Block Explorer'), h(HealthPill, null)),
+        props.children,
+    );
+}
+
+const ROUTES = [
+    {
+        name: 'home',
+        re: /^\/$/,
+        view: () => h(AppShell, null, h(HomePage, null)),
+    },
+    {
+        name: 'blockDetail',
+        re: /^\/block\/([^/]+)$/,
+        view: ({ params }) => h(AppShell, null, h(BlockDetailPage, { params })),
+    },
+    {
+        name: 'transactionDetail',
+        re: /^\/transaction\/([^/]+)$/,
+        view: ({ params }) => h(AppShell, null, h(TransactionDetailPage, { params })),
+    },
+];
+
+function AppRouter() {
+    const wired = ROUTES.map((r) => ({
+        re: r.re,
+        view: (match) => r.view({ params: match }),
+    }));
+    return h(Router, { routes: wired });
+}
+
+try {
+    if (ROOT) {
+        render(h(LoadingScreen, null), ROOT);
+        render(h(AppRouter, null), ROOT);
+    } else {
+        console.error('Mount element #app not found.');
+    }
+} catch (err) {
+    console.error('UI Error', err);
+}
