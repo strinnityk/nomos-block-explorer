@@ -30,6 +30,7 @@ def create_router() -> APIRouter:
     router.include_router(create_api_router(), prefix="/api")
     if bool(environ.get("DEBUG")):
         router.add_route("/debug", debug_router)
-    router.include_router(create_frontend_router())
+
+    router.include_router(create_frontend_router())  # Needs to go last since it contains a catch-all route
 
     return router

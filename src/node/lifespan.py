@@ -149,7 +149,7 @@ async def backfill_blocks(app: "NBE", *, db_hit_interval_seconds: int, batch_siz
         blocks = await app.state.node_api.get_blocks(slot_from=slot_from, slot_to=slot_to)
         logger.debug(f"Backfilling {len(blocks)} blocks from slot {slot_from} to {slot_to}...")
         await app.state.block_repository.create(*blocks)
-        slot_to = slot_from
+        slot_to = slot_from - 1
     logger.info("Backfilling blocks completed.")
 
 

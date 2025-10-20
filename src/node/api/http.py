@@ -37,12 +37,6 @@ class HttpNodeApi(NodeApi):
         else:
             return Health.from_unhealthy()
 
-    async def get_transactions(self) -> List[Transaction]:
-        url = urljoin(self.base_url, self.ENDPOINT_TRANSACTIONS)
-        response = requests.get(url, timeout=60)
-        json = response.json()
-        return [Transaction.model_validate(item) for item in json]
-
     async def get_blocks(self, slot_from: int, slot_to: int) -> List[Block]:
         query_string = f"slot_from={slot_from}&slot_to={slot_to}"
         endpoint = urljoin(self.base_url, self.ENDPOINT_BLOCKS)

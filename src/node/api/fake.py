@@ -20,9 +20,6 @@ class FakeNodeApi(NodeApi):
         else:
             return Health.from_healthy()
 
-    async def get_transactions(self) -> List[Transaction]:
-        return [Transaction.from_random() for _ in range(get_weighted_amount())]
-
     async def get_blocks(self) -> List[Block]:
         return [Block.from_random() for _ in range(1)]
 

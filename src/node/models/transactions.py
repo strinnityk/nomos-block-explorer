@@ -1,12 +1,16 @@
 import random
 from enum import StrEnum
-from typing import List
+from typing import TYPE_CHECKING, List, Optional
 
 from sqlalchemy import JSON, Column
-from sqlmodel import Field
+from sqlmodel import Field, Relationship
 
 from core.models import NbeSchema, TimestampedModel
+from core.sqlmodel import PydanticJsonColumn
 from utils.random import random_address
+
+if TYPE_CHECKING:
+    from node.models.blocks import Block
 
 Value = int
 Fr = int
@@ -33,7 +37,7 @@ class Note(NbeSchema):
     def from_random(cls) -> "Note":
         return Note(
             value=random.randint(1, 100),
-            public_key=random_address(),
+            public_key=random_address().encode("utf-8"),
         )
 
 
@@ -53,18 +57,22 @@ class LedgerTransaction(NbeSchema):
         )
 
 
-class Transaction(NbeSchema):  # table=true # It currently lives inside Block
+class Transaction(TimestampedModel, table=True):
     """
     MantleTx
     """
 
-    # __tablename__ = "transactions"
+    __tablename__ = "transaction"
 
-    # TODO: hash
+    block_id: int = Field(foreign_key="block.id", nullable=False, index=True)
     operations: List[str] = Field(alias="ops", default_factory=list, sa_column=Column(JSON, nullable=False))
-    ledger_transaction: LedgerTransaction = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    ledger_transaction: LedgerTransaction = Field(
+        default_factory=dict, sa_column=Column(PydanticJsonColumn(LedgerTransaction), nullable=False)
+    )
     execution_gas_price: Gas
     storage_gas_price: Gas
+
+    block: Optional["Block"] = Relationship(back_populates="transactions")
 
     def __str__(self) -> str:
         return f"Transaction({self.operations})"
@@ -74,7 +82,7 @@ class Transaction(NbeSchema):  # table=true # It currently lives inside Block
 
     @classmethod
     def from_random(cls) -> "Transaction":
-        n = random.randint(1, 10)
+        n = random.randint(1, 3)
         operations = [random.choice(list(Operation)).value for _ in range(n)]
         return Transaction(
             operations=operations,

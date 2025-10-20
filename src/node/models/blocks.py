@@ -1,16 +1,19 @@
 import logging
 import os
 import random
-from typing import Any, List, Self
+from typing import TYPE_CHECKING, Any, List, Self
 
 from pydantic.config import ExtraValues
+from pydantic_core.core_schema import computed_field
 from sqlalchemy import Column
-from sqlmodel import Field
+from sqlmodel import Field, Relationship
 
 from core.models import NbeSchema, TimestampedModel
 from core.sqlmodel import PydanticJsonColumn
-from node.models.transactions import Transaction
 from utils.random import random_hash
+
+if TYPE_CHECKING:
+    from node.models.transactions import Transaction
 
 
 def _is_debug__randomize_transactions():
@@ -81,11 +84,15 @@ class Header(NbeSchema):
 
 
 class Block(TimestampedModel, table=True):
-    __tablename__ = "blocks"
+    __tablename__ = "block"
 
     header: Header = Field(sa_column=Column(PydanticJsonColumn(Header), nullable=False))
-    transactions: List[Transaction] = Field(
-        default_factory=list, sa_column=Column(PydanticJsonColumn(Transaction, many=True), nullable=False)
+    transactions: List["Transaction"] = Relationship(
+        back_populates="block",
+        sa_relationship_kwargs={
+            "lazy": "selectin",
+            "cascade": "all, delete-orphan",
+        },
     )
 
     @property
@@ -113,6 +120,8 @@ class Block(TimestampedModel, table=True):
             json_data, strict=strict, extra=extra, context=context, by_alias=by_alias, by_name=by_name
         )
         if _is_debug__randomize_transactions():
+            from node.models.transactions import Transaction
+
             logger.debug("DEBUG and DEBUG__RANDOMIZE_TRANSACTIONS is enabled, randomizing Block's transactions.")
             n = 0 if random.randint(0, 1) <= 0.5 else random.randint(1, 10)
             self.transactions = [Transaction.from_random() for _ in range(n)]
@@ -120,9 +129,9 @@ class Block(TimestampedModel, table=True):
 
     @classmethod
     def from_random(cls, slot_from: int = 1, slot_to: int = 100) -> "Block":
-        n = random.randint(1, 10)
-        _transactions = [Transaction.from_random() for _ in range(n)]
+        n = 0 if random.randint(0, 1) < 0.3 else random.randint(1, 5)
+        transactions = [Transaction.from_random() for _ in range(n)]
         return Block(
             header=Header.from_random(slot_from, slot_to),
-            transactions=[],
+            transactions=transactions,
         )

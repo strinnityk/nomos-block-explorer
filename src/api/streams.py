@@ -1,9 +1,10 @@
 import logging
 from typing import AsyncIterable, AsyncIterator, List, Union
 
-from core.models import IdNbeModel
+from core.models import NbeModel, NbeSchema
 
-Data = Union[IdNbeModel, List[IdNbeModel]]
+T = Union[NbeModel, NbeSchema]
+Data = Union[T, List[T]]
 Stream = AsyncIterator[Data]
 
 

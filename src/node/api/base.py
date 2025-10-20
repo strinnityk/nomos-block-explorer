@@ -12,10 +12,6 @@ class NodeApi(ABC):
         pass
 
     @abstractmethod
-    async def get_transactions(self) -> List[Transaction]:
-        pass
-
-    @abstractmethod
     async def get_blocks(self, **kwargs) -> List[Block]:
         pass
 

@@ -8,14 +8,13 @@ export default function AppRouter({ routes }) {
         const handlePopState = () => setMatch(resolveRoute(location.pathname, routes));
 
         const handleLinkClick = (event) => {
-            // Only intercept unmodified left-clicks
-            if (event.defaultPrevented || event.button !== 0) return;
+            if (event.defaultPrevented || event.button !== 0) return; // only left-click
             if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
 
             const anchor = event.target.closest?.('a[href]');
             if (!anchor) return;
 
-            // Respect explicit navigation hints
+            // Respect hints/targets
             if (anchor.target && anchor.target !== '_self') return;
             if (anchor.hasAttribute('download')) return;
             if (anchor.getAttribute('rel')?.includes('external')) return;
@@ -24,13 +23,13 @@ export default function AppRouter({ routes }) {
             const href = anchor.getAttribute('href');
             if (!href) return;
 
-            // Allow in-page, mailto, and other schemes to pass through
+            // Allow in-page, mailto, tel, etc.
             if (href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('tel:')) return;
 
-            // Different origin → let the browser handle it
+            // Cross-origin goes to browser
             if (anchor.origin !== location.origin) return;
 
-            // Likely a static asset (e.g., ".css", ".png") → let it pass
+            // Likely a static asset
             if (/\.[a-z0-9]+($|\?)/i.test(href)) return;
 
             event.preventDefault();
@@ -40,7 +39,6 @@ export default function AppRouter({ routes }) {
 
         window.addEventListener('popstate', handlePopState);
         document.addEventListener('click', handleLinkClick);
-
         return () => {
             window.removeEventListener('popstate', handlePopState);
             document.removeEventListener('click', handleLinkClick);
@@ -48,13 +46,15 @@ export default function AppRouter({ routes }) {
     }, [routes]);
 
     const View = match?.view ?? NotFound;
-    return h(View, { params: match?.params ?? [] });
+    return h(View, { parameters: match?.parameters ?? [] });
 }
 
 function resolveRoute(pathname, routes) {
     for (const route of routes) {
-        const result = pathname.match(route.pattern);
-        if (result) return { view: route.view, params: result.slice(1) };
+        const rx = route.pattern || route.re;
+        if (!rx) continue;
+        const m = pathname.match(rx);
+        if (m) return { view: route.view, parameters: m.slice(1) };
     }
     return null;
 }

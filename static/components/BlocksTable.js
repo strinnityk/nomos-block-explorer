@@ -1,123 +1,133 @@
+// static/pages/BlocksTable.js
 import { h } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';
-import { BLOCKS_ENDPOINT, TABLE_SIZE } from '../lib/api.js?dev=1';
-import {streamNdjson, ensureFixedRowCount, shortenHex, formatTimestamp, withBenignFilter} from '../lib/utils.js?dev=1';
+import { PAGE, API, TABLE_SIZE } from '../lib/api.js?dev=1';
+import { streamNdjson, ensureFixedRowCount, shortenHex } from '../lib/utils.js?dev=1';
 
 export default function BlocksTable() {
-    const tbodyRef = useRef(null);
+    const bodyRef = useRef(null);
     const countRef = useRef(null);
     const abortRef = useRef(null);
     const seenKeysRef = useRef(new Set());
 
     useEffect(() => {
-        const tbody = tbodyRef.current;
+        const body = bodyRef.current;
         const counter = countRef.current;
-        ensureFixedRowCount(tbody, 5, TABLE_SIZE);
+
+        // 5 columns now (ID, Slot, Root, Parent, Transactions)
+        ensureFixedRowCount(body, 5, TABLE_SIZE);
 
         abortRef.current?.abort();
         abortRef.current = new AbortController();
 
-        function pruneAndPad() {
-            // remove placeholders
-            for (let i = tbody.rows.length - 1; i >= 0; i--) {
-                if (tbody.rows[i].classList.contains('ph')) tbody.deleteRow(i);
+        const pruneAndPad = () => {
+            for (let i = body.rows.length - 1; i >= 0; i--) {
+                if (body.rows[i].classList.contains('ph')) body.deleteRow(i);
             }
-            // trim overflow
-            while ([...tbody.rows].filter((r) => !r.classList.contains('ph')).length > TABLE_SIZE) {
-                const last = tbody.rows[tbody.rows.length - 1];
+            while ([...body.rows].filter((r) => !r.classList.contains('ph')).length > TABLE_SIZE) {
+                const last = body.rows[body.rows.length - 1];
                 const key = last?.dataset?.key;
                 if (key) seenKeysRef.current.delete(key);
-                tbody.deleteRow(-1);
+                body.deleteRow(-1);
             }
-            // pad placeholders
-            const real = [...tbody.rows].filter((r) => !r.classList.contains('ph')).length;
-            ensureFixedRowCount(tbody, 5, TABLE_SIZE);
+            // keep placeholders in sync with 5 columns
+            ensureFixedRowCount(body, 5, TABLE_SIZE);
+            const real = [...body.rows].filter((r) => !r.classList.contains('ph')).length;
             counter.textContent = String(real);
-        }
-
-        const makeLink = (href, text, title) => {
-            const a = document.createElement('a');
-            a.className = 'linkish mono';
-            a.href = href;
-            if (title) a.title = title;
-            a.textContent = text;
-            return a;
         };
 
-        const appendRow = (block, key) => {
-            const row = document.createElement('tr');
-            row.dataset.key = key;
+        const navigateToBlockDetail = (blockId) => {
+            history.pushState({}, '', PAGE.BLOCK_DETAIL(blockId));
+            window.dispatchEvent(new PopStateEvent('popstate'));
+        };
 
-            const cellSlot = document.createElement('td');
-            const spanSlot = document.createElement('span');
-            spanSlot.className = 'mono';
-            spanSlot.textContent = String(block.slot);
-            cellSlot.appendChild(spanSlot);
+        const appendRow = (b, key) => {
+            const tr = document.createElement('tr');
+            tr.dataset.key = key;
 
-            const cellRoot = document.createElement('td');
-            cellRoot.appendChild(makeLink(`/block/${block.root}`, shortenHex(block.root), block.root));
+            // ID (clickable)
+            const tdId = document.createElement('td');
+            const linkId = document.createElement('a');
+            linkId.className = 'linkish mono';
+            linkId.href = PAGE.BLOCK_DETAIL(b.id);
+            linkId.textContent = String(b.id);
+            linkId.addEventListener('click', (e) => {
+                e.preventDefault();
+                navigateToBlockDetail(b.id);
+            });
+            tdId.appendChild(linkId);
 
-            const cellParent = document.createElement('td');
-            cellParent.appendChild(makeLink(`/block/${block.parent}`, shortenHex(block.parent), block.parent));
+            // Slot
+            const tdSlot = document.createElement('td');
+            const spSlot = document.createElement('span');
+            spSlot.className = 'mono';
+            spSlot.textContent = String(b.slot);
+            tdSlot.appendChild(spSlot);
 
-            const cellTxCount = document.createElement('td');
-            const spanTx = document.createElement('span');
-            spanTx.className = 'mono';
-            spanTx.textContent = String(block.transactionCount);
-            cellTxCount.appendChild(spanTx);
+            // Root
+            const tdRoot = document.createElement('td');
+            const spRoot = document.createElement('span');
+            spRoot.className = 'mono';
+            spRoot.title = b.root;
+            spRoot.textContent = shortenHex(b.root);
+            tdRoot.appendChild(spRoot);
 
-            const cellTime = document.createElement('td');
-            const spanTime = document.createElement('span');
-            spanTime.className = 'mono';
-            spanTime.title = block.time ?? '';
-            spanTime.textContent = formatTimestamp(block.time);
-            cellTime.appendChild(spanTime);
+            // Parent
+            const tdParent = document.createElement('td');
+            const spParent = document.createElement('span');
+            spParent.className = 'mono';
+            spParent.title = b.parent;
+            spParent.textContent = shortenHex(b.parent);
+            tdParent.appendChild(spParent);
 
-            row.append(cellSlot, cellRoot, cellParent, cellTxCount, cellTime);
-            tbody.insertBefore(row, tbody.firstChild);
+            // Transactions (array length)
+            const tdCount = document.createElement('td');
+            const spCount = document.createElement('span');
+            spCount.className = 'mono';
+            spCount.textContent = String(b.transactionCount);
+            tdCount.appendChild(spCount);
+
+            tr.append(tdId, tdSlot, tdRoot, tdParent, tdCount);
+            body.insertBefore(tr, body.firstChild);
             pruneAndPad();
         };
 
         const normalize = (raw) => {
             const header = raw.header ?? raw;
-            const created = raw.created_at ?? raw.header?.created_at ?? null;
+            const txLen = Array.isArray(raw.transactions)
+                ? raw.transactions.length
+                : Array.isArray(raw.txs)
+                  ? raw.txs.length
+                  : 0;
+
             return {
                 id: Number(raw.id ?? 0),
                 slot: Number(header?.slot ?? raw.slot ?? 0),
                 root: header?.block_root ?? raw.block_root ?? '',
                 parent: header?.parent_block ?? raw.parent_block ?? '',
-                transactionCount: Array.isArray(raw.transactions)
-                    ? raw.transactions.length
-                    : typeof raw.transaction_count === 'number'
-                        ? raw.transaction_count
-                        : 0,
-                time: created,
+                transactionCount: txLen,
             };
         };
 
-        const url = `${BLOCKS_ENDPOINT}?prefetch-limit=${encodeURIComponent(TABLE_SIZE)}`;
         streamNdjson(
-            url,
+            `${API.BLOCKS_STREAM}?prefetch-limit=${encodeURIComponent(TABLE_SIZE)}`,
             (raw) => {
-                const block = normalize(raw);
-                const key = `${block.slot}:${block.id}`;
+                const b = normalize(raw);
+                const key = `${b.id}:${b.slot}`;
                 if (seenKeysRef.current.has(key)) {
                     pruneAndPad();
                     return;
                 }
                 seenKeysRef.current.add(key);
-                appendRow(block, key);
+                appendRow(b, key);
             },
             {
                 signal: abortRef.current.signal,
-                onError: withBenignFilter(
-                    (e) => console.error('Blocks stream error:', e),
-                    abortRef.current.signal
-                )
+                onError: (e) => {
+                    console.error('Blocks stream error:', e);
+                },
             },
-        ).catch((err) => {
-            if (!abortRef.current.signal.aborted) console.error('Blocks stream error:', err);
-        });
+        );
 
         return () => abortRef.current?.abort();
     }, []);
@@ -129,7 +139,7 @@ export default function BlocksTable() {
             'div',
             { class: 'card-header' },
             h('div', null, h('strong', null, 'Blocks '), h('span', { class: 'pill', ref: countRef }, '0')),
-            h('div', { style: 'color:var(--muted); font-size:12px;' }, '/api/v1/blocks/stream'),
+            h('div', { style: 'color:var(--muted); fontSize:12px;' }),
         ),
         h(
             'div',
@@ -140,18 +150,26 @@ export default function BlocksTable() {
                 h(
                     'colgroup',
                     null,
-                    h('col', { style: 'width:90px' }),
-                    h('col', { style: 'width:260px' }),
-                    h('col', { style: 'width:260px' }),
-                    h('col', { style: 'width:120px' }),
-                    h('col', { style: 'width:180px' }),
+                    h('col', { style: 'width:80px' }), // ID
+                    h('col', { style: 'width:90px' }), // Slot
+                    h('col', { style: 'width:240px' }), // Root
+                    h('col', { style: 'width:240px' }), // Parent
+                    h('col', { style: 'width:120px' }), // Transactions
                 ),
                 h(
                     'thead',
                     null,
-                    h('tr', null, h('th', null, 'Slot'), h('th', null, 'Block Root'), h('th', null, 'Parent'), h('th', null, 'Transactions'), h('th', null, 'Time')),
+                    h(
+                        'tr',
+                        null,
+                        h('th', null, 'ID'),
+                        h('th', null, 'Slot'),
+                        h('th', null, 'Block Root'),
+                        h('th', null, 'Parent'),
+                        h('th', null, 'Transactions'),
+                    ),
                 ),
-                h('tbody', { ref: tbodyRef }),
+                h('tbody', { ref: bodyRef }),
             ),
         ),
     );

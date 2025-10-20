@@ -2,11 +2,9 @@ export const isBenignStreamError = (error, signal) => {
     return false;
 };
 
-export const withBenignFilter =
-    (onError, signal) =>
-        (error) => {
-            if (!isBenignStreamError(error, signal)) onError?.(error);
-        };
+export const withBenignFilter = (onError, signal) => (error) => {
+    if (!isBenignStreamError(error, signal)) onError?.(error);
+};
 
 export async function streamNdjson(url, handleItem, { signal, onError = () => {} } = {}) {
     const response = await fetch(url, {

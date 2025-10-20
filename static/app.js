@@ -30,20 +30,22 @@ const ROUTES = [
     },
     {
         name: 'blockDetail',
-        re: /^\/block\/([^/]+)$/,
-        view: ({ params }) => h(AppShell, null, h(BlockDetailPage, { params })),
+        re: /^\/blocks\/([^/]+)$/,
+        view: ({ parameters }) => {
+            return h(AppShell, null, h(BlockDetailPage, { parameters }));
+        },
     },
     {
         name: 'transactionDetail',
-        re: /^\/transaction\/([^/]+)$/,
-        view: ({ params }) => h(AppShell, null, h(TransactionDetailPage, { params })),
+        re: /^\/transactions\/([^/]+)$/,
+        view: ({ parameters }) => h(AppShell, null, h(TransactionDetailPage, { parameters })),
     },
 ];
 
 function AppRouter() {
-    const wired = ROUTES.map((r) => ({
-        re: r.re,
-        view: (match) => r.view({ params: match }),
+    const wired = ROUTES.map((route) => ({
+        re: route.re,
+        view: route.view,
     }));
     return h(Router, { routes: wired });
 }

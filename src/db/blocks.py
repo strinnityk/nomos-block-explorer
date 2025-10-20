@@ -1,33 +1,14 @@
 from asyncio import sleep
-from typing import AsyncIterator, List, Literal
+from typing import AsyncIterator, List, Optional
 
 from rusty_results import Empty, Option, Some
-from sqlalchemy import Float, Integer, Result, String, cast, func
+from sqlalchemy import Result, Select
 from sqlalchemy.orm import aliased
 from sqlmodel import select
-from sqlmodel.sql._expression_select_cls import Select
 
+from core.db import jget, order_by_json
 from db.clients import DbClient
 from node.models.blocks import Block
-
-
-def order_by_json(
-    sql_expr, path: str, *, into_type: Literal["int", "float", "text"] = "text", descending: bool = False
-):
-    expression = jget(sql_expr, path, into_type=into_type)
-    return expression.desc() if descending else expression.asc()
-
-
-def jget(sql_expr, path: str, *, into_type: Literal["int", "float", "text"] = "text"):
-    expression = func.json_extract(sql_expr, path)
-    match into_type:
-        case "int":
-            expression = cast(expression, Integer)
-        case "float":
-            expression = cast(expression, Float)
-        case "text":
-            expression = cast(expression, String)
-    return expression
 
 
 def get_latest_statement(limit: int, latest_ascending: bool = True) -> Select:
@@ -63,8 +44,21 @@ class BlockRepository:
             results: Result[Block] = session.exec(statement)
             return results.all()
 
-    async def updates_stream(self, slot_from: int, *, timeout_seconds: int = 1) -> AsyncIterator[List[Block]]:
-        slot_cursor = slot_from
+    async def get_by_id(self, block_id: int) -> Option[Block]:
+        statement = select(Block).where(Block.id == block_id)
+
+        with self.client.session() as session:
+            result: Result[Block] = session.exec(statement)
+            if (block := result.first()) is not None:
+                return Some(block)
+            else:
+                return Empty()
+
+    async def updates_stream(
+        self, block_from: Optional[Block], *, timeout_seconds: int = 1
+    ) -> AsyncIterator[List[Block]]:
+        # FIXME
+        slot_cursor = block_from.slot + 1 if block_from is not None else 0
         block_slot_expression = jget(Block.header, "$.slot", into_type="int")
         order = order_by_json(Block.header, "$.slot", into_type="int", descending=False)
 
@@ -82,9 +76,10 @@ class BlockRepository:
                 await sleep(timeout_seconds)
 
     async def get_earliest(self) -> Option[Block]:
+        order = order_by_json(Block.header, "$.slot", into_type="int", descending=False)
+        statement = select(Block).order_by(order).limit(1)
+
         with self.client.session() as session:
-            order = order_by_json(Block.header, "$.slot", into_type="int", descending=False)
-            statement = select(Block).order_by(order).limit(1)
             results: Result[Block] = session.exec(statement)
             if (block := results.first()) is not None:
                 return Some(block)
