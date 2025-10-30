@@ -1,3 +1,5 @@
+import logging
+from os import getenv
 from random import randint
 from typing import List, Self
 
@@ -10,9 +12,31 @@ from node.api.serializers.signed_transaction import SignedTransactionSerializer
 from utils.protocols import FromRandom
 
 
+def _should_randomize_transactions():
+    is_debug = getenv("DEBUG", "False").lower() == "true"
+    is_debug__randomize_transactions = getenv("DEBUG__RANDOMIZE_TRANSACTIONS", "False").lower() == "true"
+    return is_debug and is_debug__randomize_transactions
+
+
+def _get_random_transactions() -> List[SignedTransactionSerializer]:
+    n = 1 if randint(0, 1) <= 0.5 else randint(2, 5)
+    return [SignedTransactionSerializer.from_random() for _ in range(n)]
+
+
+logger = logging.getLogger(__name__)
+
+
 class BlockSerializer(NbeSerializer, FromRandom):
     header: HeaderSerializer
     transactions: List[SignedTransactionSerializer]
+
+    @classmethod
+    def model_validate_json(cls, *args, **kwargs) -> Self:
+        self = super().model_validate_json(*args, **kwargs)
+        if _should_randomize_transactions():
+            logger.debug("DEBUG and DEBUG__RANDOMIZE_TRANSACTIONS are enabled, randomizing Block's transactions.")
+            self.transactions = _get_random_transactions()
+        return self
 
     def into_block(self) -> Block:
         transactions = [transaction.into_transaction() for transaction in self.transactions]
@@ -29,6 +53,11 @@ class BlockSerializer(NbeSerializer, FromRandom):
     @classmethod
     def from_random(cls, *, slot: Option[int] = None) -> Self:
         slot = slot or Empty()
-        n = 1 if randint(0, 1) <= 0.5 else randint(2, 5)
-        transactions = [SignedTransactionSerializer.from_random() for _ in range(n)]
+        transactions = _get_random_transactions()
         return cls.model_validate({"header": HeaderSerializer.from_random(slot=slot), "transactions": transactions})
+
+    def __str__(self) -> str:
+        return f"BlockSerializer(slot={self.header.slot})"
+
+    def __repr__(self) -> str:
+        return f"<BlockSerializer(slot={self.header.slot}, hash={self.header.hash.hex()})>"

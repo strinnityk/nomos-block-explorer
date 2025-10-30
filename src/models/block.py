@@ -1,9 +1,6 @@
 import logging
-import os
-import random
-from typing import TYPE_CHECKING, Any, List, Self
+from typing import TYPE_CHECKING, List, Self
 
-from pydantic.config import ExtraValues
 from sqlalchemy import Column
 from sqlmodel import Field, Relationship
 
@@ -17,12 +14,6 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
-
-
-def _should_randomize_transactions():
-    is_debug = os.getenv("DEBUG", "False").lower() == "true"
-    is_debug__randomize_transactions = os.getenv("DEBUG__RANDOMIZE_TRANSACTIONS", "False").lower() == "true"
-    return is_debug and is_debug__randomize_transactions
 
 
 class Block(TimestampedModel, table=True):
@@ -53,26 +44,4 @@ class Block(TimestampedModel, table=True):
 
     def with_transactions(self, transactions: List["Transaction"]) -> Self:
         self.transactions = transactions
-        return self
-
-    @classmethod
-    def model_validate_json(
-        cls,
-        json_data: str | bytes | bytearray,
-        *,
-        strict: bool | None = None,
-        extra: ExtraValues | None = None,
-        context: Any | None = None,
-        by_alias: bool | None = None,
-        by_name: bool | None = None,
-    ) -> Self:
-        self = super().model_validate_json(
-            json_data, strict=strict, extra=extra, context=context, by_alias=by_alias, by_name=by_name
-        )
-        if _should_randomize_transactions():
-            from models.transactions.transaction import Transaction
-
-            logger.debug("DEBUG and DEBUG__RANDOMIZE_TRANSACTIONS are enabled, randomizing Block's transactions.")
-            n_transactions = 0 if random.randint(0, 1) <= 0.3 else random.randint(1, 5)
-            self.transactions = [Transaction.from_random() for _ in range(n_transactions)]
         return self

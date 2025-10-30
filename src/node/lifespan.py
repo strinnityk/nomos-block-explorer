@@ -9,7 +9,6 @@ from db.blocks import BlockRepository
 from db.clients import SqliteClient
 from db.transaction import TransactionRepository
 from models.block import Block
-from models.transactions.transaction import Transaction
 from node.api.fake import FakeNodeApi
 from node.api.http import HttpNodeApi
 from node.api.serializers.block import BlockSerializer
@@ -28,8 +27,8 @@ async def node_lifespan(app: "NBE") -> AsyncGenerator[None]:
 
     app.state.node_manager = FakeNodeManager()
     # app.state.node_manager = DockerModeManager(app.settings.node_compose_filepath)
-    app.state.node_api = FakeNodeApi()
-    # app.state.node_api = HttpNodeApi(host="127.0.0.1", port=18080)
+    # app.state.node_api = FakeNodeApi()
+    app.state.node_api = HttpNodeApi(host="127.0.0.1", port=18080)
 
     app.state.db_client = db_client
     app.state.block_repository = BlockRepository(db_client)

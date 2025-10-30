@@ -82,7 +82,7 @@ class TransactionRepository:
 
         while True:
             statement = (
-                select(Transaction, Block.slot, Block.id)
+                select(Transaction)
                 .options(selectinload(Transaction.block))
                 .join(Block, Transaction.block_id == Block.id)
                 .where(

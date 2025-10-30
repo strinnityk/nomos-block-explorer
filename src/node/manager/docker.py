@@ -1,10 +1,12 @@
-from logging import error, warn
+import logging
 
 from python_on_whales import DockerException
 from python_on_whales.docker_client import DockerClient
 from rusty_results import Err, Ok, Result
 
 from node.manager.base import NodeManager
+
+logger = logging.getLogger(__name__)
 
 
 class DockerModeManager(NodeManager):
@@ -16,10 +18,10 @@ class DockerModeManager(NodeManager):
 
         match self.ps():
             case Err(1):
-                error("Compose services are not running.")
-                exit(21)  # FIXME: There's too much output here.
+                logger.error("Docker compose services are not running.")
+                exit(21)  # FIXME: There's too much output here: Don't exit here, raise error and exit outside.
             case Err(_):
-                error("Failed to run docker compose.")
+                logger.error("Failed to run docker compose.")
                 exit(20)
 
     def ps(self, only_running: bool = True) -> Result:
@@ -32,7 +34,7 @@ class DockerModeManager(NodeManager):
     async def start(self):
         services = self.ps().map(lambda _services: len(_services)).expect("Failed to get compose services.")
         if services > 0:
-            warn("Compose services are already running.")
+            logger.warn("Compose services are already running.")
             return
 
         self.client.compose.up(
