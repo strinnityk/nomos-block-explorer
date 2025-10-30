@@ -54,6 +54,9 @@ class PydanticJsonColumn(TypeDecorator, Generic[T]):
     cache_ok = True
 
     def __init__(self, model: type[T], *, many: bool = False) -> None:
+        """
+        The passed model must be a non-list type. To specify a list of models, pass `many=True`.
+        """
         super().__init__()
         self.many = many
         self._ta = _TypeAdapter(List[model] if many else model)
@@ -74,7 +77,8 @@ class PydanticJsonColumn(TypeDecorator, Generic[T]):
             model_value = self._ta.validate_python(value)
 
         # Dump to plain Python (dict/list) for the JSON column
-        return self._ta.dump_python(model_value, mode="json")
+        plain = self._ta.dump_python(model_value, mode="json")
+        return plain
 
     # DB -> Python (on SELECT)
     def process_result_value(self, value: Any, _dialect):

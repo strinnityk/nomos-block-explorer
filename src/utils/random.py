@@ -1,13 +1,18 @@
 import random
+from typing import List
 
 
-def random_hex(length: int) -> str:
-    return f"0x{random.getrandbits(length * 4):0{length}x}"
+def random_bytes(length: int) -> bytes:
+    return bytes((random.randint(0, 255) for _ in range(length)))
 
 
-def random_hash() -> str:
-    return random_hex(64)
+def random_address() -> bytes:
+    return random_bytes(40)
 
 
-def random_address() -> str:
-    return random_hex(40)
+def random_hash() -> bytes:
+    return random_bytes(64)
+
+
+def as_list(data: bytes) -> List[int]:
+    return list(data)

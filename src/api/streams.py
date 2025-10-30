@@ -18,7 +18,7 @@ def _into_ndjson_data(data: Data) -> bytes:
         return data.model_dump_ndjson()
 
 
-async def into_ndjson_stream(stream: Stream, bootstrap_data: Data = None) -> AsyncIterable[bytes]:
+async def into_ndjson_stream(stream: Stream, *, bootstrap_data: Data = None) -> AsyncIterable[bytes]:
     if bootstrap_data is not None:
         ndjson_data = _into_ndjson_data(bootstrap_data)
         if ndjson_data:

@@ -1,20 +1,19 @@
 from abc import ABC, abstractmethod
 from typing import AsyncIterator, List
 
-from node.models.blocks import Block
-from node.models.health import Health
-from node.models.transactions import Transaction
+from node.api.serializers.block import BlockSerializer
+from node.api.serializers.health import HealthSerializer
 
 
 class NodeApi(ABC):
     @abstractmethod
-    async def get_health_check(self) -> Health:
+    async def get_health(self) -> HealthSerializer:
         pass
 
     @abstractmethod
-    async def get_blocks(self, **kwargs) -> List[Block]:
+    async def get_blocks(self, **kwargs) -> List[BlockSerializer]:
         pass
 
     @abstractmethod
-    async def get_blocks_stream(self) -> AsyncIterator[List[Block]]:
+    async def get_blocks_stream(self) -> AsyncIterator[List[BlockSerializer]]:
         pass

@@ -1,10 +1,12 @@
+from asyncio import sleep
 from random import choices, random
 from typing import AsyncIterator, List
 
+from rusty_results import Some
+
 from node.api.base import NodeApi
-from node.models.blocks import Block
-from node.models.health import Health
-from node.models.transactions import Transaction
+from node.api.serializers.block import BlockSerializer
+from node.api.serializers.health import HealthSerializer
 
 
 def get_weighted_amount() -> int:
@@ -14,15 +16,24 @@ def get_weighted_amount() -> int:
 
 
 class FakeNodeApi(NodeApi):
-    async def get_health_check(self) -> Health:
+    def __init__(self):
+        self.current_slot: int = 0
+
+    async def get_health(self) -> HealthSerializer:
         if random() < 0.1:
-            return Health.from_unhealthy()
+            return HealthSerializer.from_unhealthy()
         else:
-            return Health.from_healthy()
+            return HealthSerializer.from_healthy()
 
-    async def get_blocks(self) -> List[Block]:
-        return [Block.from_random() for _ in range(1)]
+    async def get_blocks(self, **kwargs) -> List[BlockSerializer]:
+        n = get_weighted_amount()
+        assert n >= 1
+        blocks = [BlockSerializer.from_random() for _ in range(n)]
+        self.current_slot = max(blocks, key=lambda block: block.slot).slot
+        return blocks
 
-    async def get_blocks_stream(self) -> AsyncIterator[Block]:
+    async def get_blocks_stream(self) -> AsyncIterator[BlockSerializer]:
         while True:
-            yield Block.from_random()
+            yield BlockSerializer.from_random(slot=Some(self.current_slot))
+            self.current_slot += 1
+            await sleep(3)

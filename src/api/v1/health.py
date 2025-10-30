@@ -5,22 +5,24 @@ from starlette.responses import JSONResponse, Response
 
 from api.streams import into_ndjson_stream
 from core.api import NBERequest, NDJsonStreamingResponse
+from models.health import Health
 from node.api.base import NodeApi
-from node.models.health import Health
+from node.api.serializers.health import HealthSerializer
 
 
 async def get(request: NBERequest) -> Response:
-    response = await request.app.state.node_api.get_health_check()
+    response = await request.app.state.node_api.get_health()
     return JSONResponse(response)
 
 
-async def _health_iterator(node_api: NodeApi) -> AsyncIterator[Health]:
+async def _create_health_stream(node_api: NodeApi, *, poll_interval_seconds: int = 10) -> AsyncIterator[Health]:
     while True:
-        yield await node_api.get_health_check()
-        await sleep(10)
+        health_serializer: HealthSerializer = await node_api.get_health()
+        yield health_serializer.into_health()
+        await sleep(poll_interval_seconds)
 
 
 async def stream(request: NBERequest) -> Response:
-    _stream = _health_iterator(request.app.state.node_api)
-    health_stream = into_ndjson_stream(stream=_stream)
-    return NDJsonStreamingResponse(health_stream)
+    health_stream = _create_health_stream(request.app.state.node_api)
+    ndjson_health_stream = into_ndjson_stream(health_stream)
+    return NDJsonStreamingResponse(ndjson_health_stream)

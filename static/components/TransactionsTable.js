@@ -1,139 +1,167 @@
+// static/pages/TransactionsTable.js
 import { h } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';
 import { API, TABLE_SIZE } from '../lib/api.js?dev=1';
 import {
     streamNdjson,
     ensureFixedRowCount,
-    shortenHex,
-    formatTimestamp,
+    shortenHex, // (kept in case you want to use later)
     withBenignFilter,
 } from '../lib/utils.js?dev=1';
 
 const OPERATIONS_PREVIEW_LIMIT = 2;
 
+// ---------- small DOM helpers ----------
 function createSpan(className, text, title) {
-    const element = document.createElement('span');
-    if (className) element.className = className;
-    if (title) element.title = title;
-    element.textContent = text;
-    return element;
+    const el = document.createElement('span');
+    if (className) el.className = className;
+    if (title) el.title = title;
+    el.textContent = text;
+    return el;
 }
 
 function createLink(href, text, title) {
-    const element = document.createElement('a');
-    element.className = 'linkish mono';
-    element.href = href;
-    if (title) element.title = title;
-    element.textContent = text;
-    return element;
+    const el = document.createElement('a');
+    el.className = 'linkish mono';
+    el.href = href;
+    if (title) el.title = title;
+    el.textContent = text;
+    return el;
 }
 
+// ---------- coercion / formatting helpers ----------
+const toNumber = (v) => {
+    if (v == null) return 0;
+    if (typeof v === 'number') return v;
+    if (typeof v === 'bigint') return Number(v);
+    if (typeof v === 'string') {
+        const s = v.trim();
+        if (/^0x[0-9a-f]+$/i.test(s)) return Number(BigInt(s));
+        const n = Number(s);
+        return Number.isFinite(n) ? n : 0;
+    }
+    if (typeof v === 'object' && v !== null && 'value' in v) return toNumber(v.value);
+    return 0;
+};
+
+const opLabel = (op) => {
+    if (op == null) return 'op';
+    if (typeof op === 'string' || typeof op === 'number') return String(op);
+    if (typeof op !== 'object') return String(op);
+    if (typeof op.type === 'string') return op.type;
+    if (typeof op.kind === 'string') return op.kind;
+    if (op.content) {
+        if (typeof op.content.type === 'string') return op.content.type;
+        if (typeof op.content.kind === 'string') return op.content.kind;
+    }
+    const keys = Object.keys(op);
+    return keys.length ? keys[0] : 'op';
+};
+
+function formatOperationsPreview(ops) {
+    if (!ops?.length) return '—';
+    const labels = ops.map(opLabel);
+    if (labels.length <= OPERATIONS_PREVIEW_LIMIT) return labels.join(', ');
+    const head = labels.slice(0, OPERATIONS_PREVIEW_LIMIT).join(', ');
+    const remainder = labels.length - OPERATIONS_PREVIEW_LIMIT;
+    return `${head} +${remainder}`;
+}
+
+// ---------- normalize API → view model ----------
 function normalizeTransaction(raw) {
-    // Defensive parsing and intent-revealing structure
-    const operations = Array.isArray(raw?.ops) ? raw.ops : Array.isArray(raw?.operations) ? raw.operations : [];
+    // { id, block_id, hash, operations:[Operation], inputs:[HexBytes], outputs:[Note], proof, execution_gas_price, storage_gas_price, created_at? }
+    const ops = Array.isArray(raw?.operations) ? raw.operations : Array.isArray(raw?.ops) ? raw.ops : [];
 
-    const ledgerOutputs = Array.isArray(raw?.ledger_transaction?.outputs) ? raw.ledger_transaction.outputs : [];
-
-    const totalOutputValue = ledgerOutputs.reduce((sum, note) => sum + Number(note?.value ?? 0), 0);
+    const outputs = Array.isArray(raw?.outputs) ? raw.outputs : [];
+    const totalOutputValue = outputs.reduce((sum, note) => sum + toNumber(note?.value), 0);
 
     return {
         id: raw?.id ?? '',
-        operations,
-        createdAt: raw?.created_at ?? raw?.timestamp ?? '',
-        executionGasPrice: Number(raw?.execution_gas_price ?? 0),
-        storageGasPrice: Number(raw?.storage_gas_price ?? 0),
-        numberOfOutputs: ledgerOutputs.length,
+        operations: ops,
+        executionGasPrice: toNumber(raw?.execution_gas_price),
+        storageGasPrice: toNumber(raw?.storage_gas_price),
+        numberOfOutputs: outputs.length,
         totalOutputValue,
     };
 }
 
-function formatOperationsPreview(operations) {
-    if (operations.length === 0) return '—';
-    if (operations.length <= OPERATIONS_PREVIEW_LIMIT) return operations.join(', ');
-    const head = operations.slice(0, OPERATIONS_PREVIEW_LIMIT).join(', ');
-    const remainder = operations.length - OPERATIONS_PREVIEW_LIMIT;
-    return `${head} +${remainder}`;
-}
-
-function buildTransactionRow(transactionData) {
-    const row = document.createElement('tr');
+// ---------- row builder ----------
+function buildTransactionRow(tx) {
+    const tr = document.createElement('tr');
 
     // ID
-    const cellId = document.createElement('td');
-    cellId.className = 'mono';
-    cellId.appendChild(
-        createLink(`/transactions/${transactionData.id}`, String(transactionData.id), String(transactionData.id)),
+    const tdId = document.createElement('td');
+    tdId.className = 'mono';
+    tdId.appendChild(createLink(`/transactions/${tx.id}`, String(tx.id), String(tx.id)));
+
+    // Operations (preview)
+    const tdOps = document.createElement('td');
+    const preview = formatOperationsPreview(tx.operations);
+    tdOps.appendChild(
+        createSpan('', preview, Array.isArray(tx.operations) ? tx.operations.map(opLabel).join(', ') : ''),
     );
 
-    // Operations
-    const cellOperations = document.createElement('td');
-    const operationsPreview = formatOperationsPreview(transactionData.operations);
-    cellOperations.appendChild(createSpan('', operationsPreview, transactionData.operations.join(', ')));
-
-    // Outputs (count / total value)
-    const cellOutputs = document.createElement('td');
-    cellOutputs.className = 'amount';
-    cellOutputs.textContent = `${transactionData.numberOfOutputs} / ${transactionData.totalOutputValue.toLocaleString(undefined, { maximumFractionDigits: 8 })}`;
+    // Outputs (count / total)
+    const tdOut = document.createElement('td');
+    tdOut.className = 'amount';
+    tdOut.textContent = `${tx.numberOfOutputs} / ${tx.totalOutputValue.toLocaleString(undefined, { maximumFractionDigits: 8 })}`;
 
     // Gas (execution / storage)
-    const cellGas = document.createElement('td');
-    cellGas.className = 'mono';
-    cellGas.textContent = `${transactionData.executionGasPrice.toLocaleString()} / ${transactionData.storageGasPrice.toLocaleString()}`;
+    const tdGas = document.createElement('td');
+    tdGas.className = 'mono';
+    tdGas.textContent = `${tx.executionGasPrice.toLocaleString()} / ${tx.storageGasPrice.toLocaleString()}`;
 
-    // Time
-    const cellTime = document.createElement('td');
-    const timeSpan = createSpan('mono', formatTimestamp(transactionData.createdAt), String(transactionData.createdAt));
-    cellTime.appendChild(timeSpan);
-
-    row.append(cellId, cellOperations, cellOutputs, cellGas, cellTime);
-    return row;
+    tr.append(tdId, tdOps, tdOut, tdGas);
+    return tr;
 }
 
+// ---------- component ----------
 export default function TransactionsTable() {
-    const tableBodyRef = useRef(null);
-    const counterRef = useRef(null);
-    const abortControllerRef = useRef(null);
+    const bodyRef = useRef(null);
+    const countRef = useRef(null);
+    const abortRef = useRef(null);
     const totalCountRef = useRef(0);
 
     useEffect(() => {
-        const tableBodyElement = tableBodyRef.current;
-        const counterElement = counterRef.current;
-        ensureFixedRowCount(tableBodyElement, 4, TABLE_SIZE);
+        const body = bodyRef.current;
+        const counter = countRef.current;
 
-        abortControllerRef.current?.abort();
-        abortControllerRef.current = new AbortController();
+        // 4 columns: ID | Operations | Outputs | Gas
+        ensureFixedRowCount(body, 4, TABLE_SIZE);
+
+        abortRef.current?.abort();
+        abortRef.current = new AbortController();
 
         const url = `${API.TRANSACTIONS_STREAM}?prefetch-limit=${encodeURIComponent(TABLE_SIZE)}`;
 
         streamNdjson(
             url,
-            (rawTransaction) => {
+            (raw) => {
                 try {
-                    const transactionData = normalizeTransaction(rawTransaction);
-                    const row = buildTransactionRow(transactionData);
+                    const tx = normalizeTransaction(raw);
+                    const row = buildTransactionRow(tx);
+                    body.insertBefore(row, body.firstChild);
 
-                    tableBodyElement.insertBefore(row, tableBodyElement.firstChild);
-                    while (tableBodyElement.rows.length > TABLE_SIZE) tableBodyElement.deleteRow(-1);
-                    counterElement.textContent = String(++totalCountRef.current);
-                } catch (error) {
-                    // Fail fast per row, but do not break the stream
-                    console.error('Failed to render transaction row:', error);
+                    while (body.rows.length > TABLE_SIZE) body.deleteRow(-1);
+                    counter.textContent = String(++totalCountRef.current);
+                } catch (err) {
+                    console.error('Failed to render transaction row:', err, raw);
                 }
             },
             {
-                signal: abortControllerRef.current.signal,
+                signal: abortRef.current.signal,
                 onError: withBenignFilter(
-                    (error) => console.error('Transaction stream error:', error),
-                    abortControllerRef.current.signal,
+                    (err) => console.error('Transactions stream error:', err),
+                    abortRef.current.signal,
                 ),
             },
-        ).catch((error) => {
-            if (!abortControllerRef.current.signal.aborted) {
-                console.error('Transactions stream connection error:', error);
+        ).catch((err) => {
+            if (!abortRef.current.signal.aborted) {
+                console.error('Transactions stream connection error:', err);
             }
         });
 
-        return () => abortControllerRef.current?.abort();
+        return () => abortRef.current?.abort();
     }, []);
 
     return h(
@@ -142,7 +170,7 @@ export default function TransactionsTable() {
         h(
             'div',
             { class: 'card-header' },
-            h('div', null, h('strong', null, 'Transactions '), h('span', { class: 'pill', ref: counterRef }, '0')),
+            h('div', null, h('strong', null, 'Transactions '), h('span', { class: 'pill', ref: countRef }, '0')),
             h('div', { style: 'color:var(--muted); font-size:12px;' }),
         ),
         h(
@@ -156,9 +184,8 @@ export default function TransactionsTable() {
                     null,
                     h('col', { style: 'width:120px' }), // ID
                     h('col', null), // Operations
-                    h('col', { style: 'width:180px' }), // Outputs (count / total)
-                    h('col', { style: 'width:180px' }), // Gas (execution / storage)
-                    h('col', { style: 'width:180px' }), // Time
+                    h('col', { style: 'width:200px' }), // Outputs (count / total)
+                    h('col', { style: 'width:200px' }), // Gas (execution / storage)
                 ),
                 h(
                     'thead',
@@ -170,10 +197,9 @@ export default function TransactionsTable() {
                         h('th', null, 'Operations'),
                         h('th', null, 'Outputs (count / total)'),
                         h('th', null, 'Gas (execution / storage)'),
-                        h('th', null, 'Time'),
                     ),
                 ),
-                h('tbody', { ref: tableBodyRef }),
+                h('tbody', { ref: bodyRef }),
             ),
         ),
     );

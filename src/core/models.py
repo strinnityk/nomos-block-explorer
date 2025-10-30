@@ -28,6 +28,10 @@ class NbeSchema(NdjsonMixin, BaseModel):
         return self.model_dump_json()
 
 
+class NbeSerializer(NbeSchema):
+    pass
+
+
 # --- SQLModel ---
 
 

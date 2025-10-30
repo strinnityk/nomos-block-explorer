@@ -14,24 +14,26 @@ export default function BlocksTable() {
         const body = bodyRef.current;
         const counter = countRef.current;
 
-        // 5 columns now (ID, Slot, Root, Parent, Transactions)
-        ensureFixedRowCount(body, 5, TABLE_SIZE);
+        // 6 columns: ID | Slot | Hash | Parent | Block Root | Transactions
+        ensureFixedRowCount(body, 6, TABLE_SIZE);
 
         abortRef.current?.abort();
         abortRef.current = new AbortController();
 
         const pruneAndPad = () => {
+            // remove any placeholder rows that snuck in
             for (let i = body.rows.length - 1; i >= 0; i--) {
                 if (body.rows[i].classList.contains('ph')) body.deleteRow(i);
             }
+            // keep at most TABLE_SIZE non-placeholder rows
             while ([...body.rows].filter((r) => !r.classList.contains('ph')).length > TABLE_SIZE) {
                 const last = body.rows[body.rows.length - 1];
                 const key = last?.dataset?.key;
                 if (key) seenKeysRef.current.delete(key);
                 body.deleteRow(-1);
             }
-            // keep placeholders in sync with 5 columns
-            ensureFixedRowCount(body, 5, TABLE_SIZE);
+            // pad with placeholders to TABLE_SIZE (6 cols)
+            ensureFixedRowCount(body, 6, TABLE_SIZE);
             const real = [...body.rows].filter((r) => !r.classList.contains('ph')).length;
             counter.textContent = String(real);
         };
@@ -64,21 +66,29 @@ export default function BlocksTable() {
             spSlot.textContent = String(b.slot);
             tdSlot.appendChild(spSlot);
 
-            // Root
-            const tdRoot = document.createElement('td');
-            const spRoot = document.createElement('span');
-            spRoot.className = 'mono';
-            spRoot.title = b.root;
-            spRoot.textContent = shortenHex(b.root);
-            tdRoot.appendChild(spRoot);
+            // Hash
+            const tdHash = document.createElement('td');
+            const spHash = document.createElement('span');
+            spHash.className = 'mono';
+            spHash.title = b.hash;
+            spHash.textContent = shortenHex(b.hash);
+            tdHash.appendChild(spHash);
 
-            // Parent
+            // Parent (block.parent_block_hash)
             const tdParent = document.createElement('td');
             const spParent = document.createElement('span');
             spParent.className = 'mono';
             spParent.title = b.parent;
             spParent.textContent = shortenHex(b.parent);
             tdParent.appendChild(spParent);
+
+            // Block Root
+            const tdRoot = document.createElement('td');
+            const spRoot = document.createElement('span');
+            spRoot.className = 'mono';
+            spRoot.title = b.root;
+            spRoot.textContent = shortenHex(b.root);
+            tdRoot.appendChild(spRoot);
 
             // Transactions (array length)
             const tdCount = document.createElement('td');
@@ -87,13 +97,16 @@ export default function BlocksTable() {
             spCount.textContent = String(b.transactionCount);
             tdCount.appendChild(spCount);
 
-            tr.append(tdId, tdSlot, tdRoot, tdParent, tdCount);
+            tr.append(tdId, tdSlot, tdHash, tdParent, tdRoot, tdCount);
             body.insertBefore(tr, body.firstChild);
             pruneAndPad();
         };
 
         const normalize = (raw) => {
-            const header = raw.header ?? raw;
+            // New backend:
+            // { id, hash, slot, block_root, parent_block_hash, transactions: [...] }
+            // Back-compat (header.* / raw.parent_block) just in case.
+            const header = raw.header ?? null;
             const txLen = Array.isArray(raw.transactions)
                 ? raw.transactions.length
                 : Array.isArray(raw.txs)
@@ -102,9 +115,10 @@ export default function BlocksTable() {
 
             return {
                 id: Number(raw.id ?? 0),
-                slot: Number(header?.slot ?? raw.slot ?? 0),
-                root: header?.block_root ?? raw.block_root ?? '',
-                parent: header?.parent_block ?? raw.parent_block ?? '',
+                slot: Number(raw.slot ?? header?.slot ?? 0),
+                hash: raw.hash ?? header?.hash ?? '',
+                parent: raw.parent_block_hash ?? header?.parent_block ?? raw.parent_block ?? '',
+                root: raw.block_root ?? header?.block_root ?? '',
                 transactionCount: txLen,
             };
         };
@@ -152,8 +166,9 @@ export default function BlocksTable() {
                     null,
                     h('col', { style: 'width:80px' }), // ID
                     h('col', { style: 'width:90px' }), // Slot
-                    h('col', { style: 'width:240px' }), // Root
+                    h('col', { style: 'width:240px' }), // Hash
                     h('col', { style: 'width:240px' }), // Parent
+                    h('col', { style: 'width:240px' }), // Block Root
                     h('col', { style: 'width:120px' }), // Transactions
                 ),
                 h(
@@ -164,8 +179,9 @@ export default function BlocksTable() {
                         null,
                         h('th', null, 'ID'),
                         h('th', null, 'Slot'),
-                        h('th', null, 'Block Root'),
+                        h('th', null, 'Hash'),
                         h('th', null, 'Parent'),
+                        h('th', null, 'Block Root'),
                         h('th', null, 'Transactions'),
                     ),
                 ),

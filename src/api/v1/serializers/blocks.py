@@ -1,21 +1,29 @@
 from typing import List, Self
 
 from core.models import NbeSchema
-from node.models.blocks import Block, Header
-from node.models.transactions import Transaction
+from core.types import HexBytes
+from models.block import Block
+from models.header.proof_of_leadership import ProofOfLeadership
+from models.transactions.transaction import Transaction
 
 
 class BlockRead(NbeSchema):
     id: int
+    hash: HexBytes
+    parent_block_hash: HexBytes
     slot: int
-    header: Header
+    block_root: HexBytes
+    proof_of_leadership: ProofOfLeadership
     transactions: List[Transaction]
 
     @classmethod
     def from_block(cls, block: Block) -> Self:
         return cls(
             id=block.id,
-            slot=block.header.slot,
-            header=block.header,
+            hash=block.hash,
+            parent_block_hash=block.parent_block,
+            slot=block.slot,
+            block_root=block.block_root,
+            proof_of_leadership=block.proof_of_leadership,
             transactions=block.transactions,
         )

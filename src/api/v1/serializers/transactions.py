@@ -1,14 +1,21 @@
 from typing import List, Self
 
 from core.models import NbeSchema
-from node.models.transactions import Gas, LedgerTransaction, Transaction
+from core.types import HexBytes
+from models.aliases import Gas
+from models.transactions.notes import Note
+from models.transactions.operations.operation import Operation
+from models.transactions.transaction import Transaction
 
 
 class TransactionRead(NbeSchema):
     id: int
     block_id: int
-    operations: List[str]
-    ledger_transaction: LedgerTransaction
+    hash: HexBytes
+    operations: List[Operation]
+    inputs: List[HexBytes]
+    outputs: List[Note]
+    proof: HexBytes
     execution_gas_price: Gas
     storage_gas_price: Gas
 
@@ -16,9 +23,12 @@ class TransactionRead(NbeSchema):
     def from_transaction(cls, transaction: Transaction) -> Self:
         return cls(
             id=transaction.id,
-            block_id=transaction.block_id,
+            block_id=transaction.block.id,
+            hash=transaction.hash,
             operations=transaction.operations,
-            ledger_transaction=transaction.ledger_transaction,
+            inputs=transaction.inputs,
+            outputs=transaction.outputs,
+            proof=transaction.proof,
             execution_gas_price=transaction.execution_gas_price,
             storage_gas_price=transaction.storage_gas_price,
         )

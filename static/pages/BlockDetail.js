@@ -5,24 +5,41 @@ import { API, PAGE } from '../lib/api.js?dev=1';
 
 const OPERATIONS_PREVIEW_LIMIT = 2;
 
-// Helpers
+// ---- Helpers ----
+const opLabel = (op) => {
+    if (op == null) return 'op';
+    if (typeof op === 'string' || typeof op === 'number') return String(op);
+    if (typeof op !== 'object') return String(op);
+    if (typeof op.type === 'string') return op.type;
+    if (typeof op.kind === 'string') return op.kind;
+    if (op.content) {
+        if (typeof op.content.type === 'string') return op.content.type;
+        if (typeof op.content.kind === 'string') return op.content.kind;
+    }
+    const keys = Object.keys(op);
+    return keys.length ? keys[0] : 'op';
+};
+
 function opsToPills(ops, limit = OPERATIONS_PREVIEW_LIMIT) {
     const arr = Array.isArray(ops) ? ops : [];
     if (!arr.length) return h('span', { style: 'color:var(--muted); white-space:nowrap;' }, '—');
-    const shown = arr.slice(0, limit);
-    const extra = arr.length - shown.length;
+
+    const labels = arr.map(opLabel);
+    const shown = labels.slice(0, limit);
+    const extra = labels.length - shown.length;
+
     return h(
         'div',
         { style: 'display:flex; gap:6px; flex-wrap:nowrap; align-items:center; white-space:nowrap;' },
-        ...shown.map((op, i) =>
-            h('span', { key: `${op}-${i}`, class: 'pill', title: op, style: 'flex:0 0 auto;' }, op),
+        ...shown.map((label, i) =>
+            h('span', { key: `${label}-${i}`, class: 'pill', title: label, style: 'flex:0 0 auto;' }, label),
         ),
         extra > 0 && h('span', { class: 'pill', title: `${extra} more`, style: 'flex:0 0 auto;' }, `+${extra}`),
     );
 }
 
-function computeOutputsSummary(ledgerTransaction) {
-    const outputs = Array.isArray(ledgerTransaction?.outputs) ? ledgerTransaction.outputs : [];
+function computeOutputsSummaryFromTx(tx) {
+    const outputs = Array.isArray(tx?.outputs) ? tx.outputs : [];
     const count = outputs.length;
     const total = outputs.reduce((sum, o) => sum + Number(o?.value ?? 0), 0);
     return { count, total };
@@ -112,9 +129,15 @@ export default function BlockDetailPage({ parameters }) {
         };
     }, [blockId, isValidId]);
 
-    const header = block?.header ?? {};
+    const header = block?.header ?? {}; // back-compat only
     const transactions = Array.isArray(block?.transactions) ? block.transactions : [];
-    const slot = block?.slot ?? header.slot;
+
+    // Prefer new top-level fields; fallback to legacy header.*
+    const slot = block?.slot ?? header?.slot ?? null;
+    const blockRoot = block?.block_root ?? header?.block_root ?? '';
+    const blockHash = block?.hash ?? header?.hash ?? '';
+    const parentId = block?.parent_id ?? null;
+    const parentHash = block?.parent_block_hash ?? header?.parent_block ?? '';
 
     return h(
         'main',
@@ -170,6 +193,23 @@ export default function BlockDetailPage({ parameters }) {
                         'div',
                         { style: 'padding:12px 14px; display:grid; grid-template-columns: 120px 1fr; gap:8px 12px;' },
 
+                        // Hash (pill + copy)
+                        h('div', null, h('b', null, 'Hash:')),
+                        h(
+                            'div',
+                            { style: 'display:flex; gap:8px; flex-wrap:wrap; align-items:flex-start;' },
+                            h(
+                                'span',
+                                {
+                                    class: 'pill mono',
+                                    title: blockHash,
+                                    style: 'max-width:100%; overflow-wrap:anywhere; word-break:break-word;',
+                                },
+                                String(blockHash),
+                            ),
+                            h(CopyPill, { text: blockHash }),
+                        ),
+
                         // Root (pill + copy)
                         h('div', null, h('b', null, 'Root:')),
                         h(
@@ -179,40 +219,40 @@ export default function BlockDetailPage({ parameters }) {
                                 'span',
                                 {
                                     class: 'pill mono',
-                                    title: header.block_root ?? '',
+                                    title: blockRoot,
                                     style: 'max-width:100%; overflow-wrap:anywhere; word-break:break-word;',
                                 },
-                                String(header.block_root ?? ''),
+                                String(blockRoot),
                             ),
-                            h(CopyPill, { text: header.block_root }),
+                            h(CopyPill, { text: blockRoot }),
                         ),
 
-                        // Parent (pill + copy)
+                        // Parent (id link OR parent hash) + copy
                         h('div', null, h('b', null, 'Parent:')),
                         h(
                             'div',
                             { style: 'display:flex; gap:8px; flex-wrap:wrap; align-items:flex-start;' },
-                            block?.parent_id
+                            parentId != null
                                 ? h(
                                       'a',
                                       {
                                           class: 'pill mono linkish',
-                                          href: PAGE.BLOCK_DETAIL(block.parent_id),
-                                          title: String(block.parent_id),
+                                          href: PAGE.BLOCK_DETAIL(parentId),
+                                          title: String(parentId),
                                           style: 'max-width:100%; overflow-wrap:anywhere; word-break:break-word;',
                                       },
-                                      String(block.parent_id),
+                                      String(parentId),
                                   )
                                 : h(
                                       'span',
                                       {
                                           class: 'pill mono',
-                                          title: header.parent_block ?? '',
+                                          title: parentHash,
                                           style: 'max-width:100%; overflow-wrap:anywhere; word-break:break-word;',
                                       },
-                                      String(header.parent_block ?? ''),
+                                      String(parentHash || '—'),
                                   ),
-                            h(CopyPill, { text: block?.parent_id ?? header.parent_block }),
+                            h(CopyPill, { text: parentId ?? parentHash }),
                         ),
                     ),
                 ),
@@ -234,7 +274,6 @@ export default function BlockDetailPage({ parameters }) {
                             'table',
                             {
                                 class: 'table--transactions',
-                                // Fill card by default; expand + scroll if content is wider
                                 style: 'min-width:100%; width:max-content; table-layout:auto; border-collapse:collapse;',
                             },
                             h(
@@ -265,10 +304,10 @@ export default function BlockDetailPage({ parameters }) {
                                 'tbody',
                                 null,
                                 ...transactions.map((t) => {
-                                    const operations = Array.isArray(t?.operations) ? t.operations : [];
-                                    const { count, total } = computeOutputsSummary(t?.ledger_transaction);
+                                    const { count, total } = computeOutputsSummaryFromTx(t);
                                     const executionGas = Number(t?.execution_gas_price ?? 0);
                                     const storageGas = Number(t?.storage_gas_price ?? 0);
+                                    const ops = Array.isArray(t?.operations) ? t.operations : [];
 
                                     return h(
                                         'tr',
@@ -309,7 +348,7 @@ export default function BlockDetailPage({ parameters }) {
                                         h(
                                             'td',
                                             { style: 'text-align:left; padding:8px 10px; white-space:nowrap;' },
-                                            opsToPills(operations),
+                                            opsToPills(ops),
                                         ),
                                     );
                                 }),

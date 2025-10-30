@@ -1,19 +1,20 @@
 import logging
 from asyncio import TaskGroup, create_task, sleep
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, AsyncGenerator, AsyncIterator
+from typing import TYPE_CHECKING, AsyncGenerator, AsyncIterator, List
 
 from rusty_results import Option
 
 from db.blocks import BlockRepository
 from db.clients import SqliteClient
 from db.transaction import TransactionRepository
+from models.block import Block
+from models.transactions.transaction import Transaction
 from node.api.fake import FakeNodeApi
 from node.api.http import HttpNodeApi
+from node.api.serializers.block import BlockSerializer
 from node.manager.docker import DockerModeManager
 from node.manager.fake import FakeNodeManager
-from node.models.blocks import Block
-from node.models.transactions import Transaction
 
 if TYPE_CHECKING:
     from core.app import NBE
@@ -27,8 +28,8 @@ async def node_lifespan(app: "NBE") -> AsyncGenerator[None]:
 
     app.state.node_manager = FakeNodeManager()
     # app.state.node_manager = DockerModeManager(app.settings.node_compose_filepath)
-    # app.state.node_api = FakeNodeApi()
-    app.state.node_api = HttpNodeApi(host="127.0.0.1", port=18080)
+    app.state.node_api = FakeNodeApi()
+    # app.state.node_api = HttpNodeApi(host="127.0.0.1", port=18080)
 
     app.state.db_client = db_client
     app.state.block_repository = BlockRepository(db_client)
@@ -88,21 +89,34 @@ async def _gracefully_close_stream(stream: AsyncIterator) -> None:
 
 
 async def subscribe_to_new_blocks(app: "NBE"):
-    blocks_stream: AsyncGenerator[Block] = app.state.node_api.get_blocks_stream()  # type: ignore[call-arg]
+    blocks_stream: AsyncGenerator[BlockSerializer] = app.state.node_api.get_blocks_stream()  # type: ignore[call-arg]
     try:
         while app.state.is_running:
             try:
-                block = await anext(blocks_stream)  # TODO: Use anext's Sentinel?
-            except StopAsyncIteration:
-                logger.error("Subscription to the new blocks stream ended unexpectedly. Please restart the node.")
-                break
+                block_serializer = await anext(blocks_stream)  # TODO: Use anext's Sentinel?
             except TimeoutError:
                 continue
+            except StopAsyncIteration:
+                import traceback
+
+                traceback.print_exc()
+                logger.error("Subscription to the new blocks stream ended unexpectedly. Please restart the node.")
+                break
             except Exception as e:
+                import traceback
+
+                traceback.print_exc()
                 logger.error(f"Error while fetching new blocks: {e}")
                 continue
 
-            await app.state.block_repository.create(block)
+            try:
+                block = block_serializer.into_block()
+                await app.state.block_repository.create(block)
+            except Exception as e:
+                import traceback
+
+                traceback.print_exc()
+                logger.error(f"Error while saving new block: {e}")
     finally:
         await _gracefully_close_stream(blocks_stream)
 
@@ -146,7 +160,10 @@ async def backfill_blocks(app: "NBE", *, db_hit_interval_seconds: int, batch_siz
     logger.info(f"Backfilling blocks from slot {slot_to} down to 0...")
     while slot_to > 0:
         slot_from = max(0, slot_to - batch_size)
-        blocks = await app.state.node_api.get_blocks(slot_from=slot_from, slot_to=slot_to)
+        blocks_serializers: List[BlockSerializer] = await app.state.node_api.get_blocks(
+            slot_from=slot_from, slot_to=slot_to
+        )
+        blocks: List[Block] = [block_serializer.into_block() for block_serializer in blocks_serializers]
         logger.debug(f"Backfilling {len(blocks)} blocks from slot {slot_from} to {slot_to}...")
         await app.state.block_repository.create(*blocks)
         slot_to = slot_from - 1

@@ -7,9 +7,10 @@ import { API } from '../lib/api.js?dev=1';
 const isNumber = (v) => typeof v === 'number' && !Number.isNaN(v);
 const toLocaleNum = (n, opts = {}) => Number(n ?? 0).toLocaleString(undefined, { maximumFractionDigits: 8, ...opts });
 
-// Try to render bytes in a readable way without guessing too hard
+// Best-effort pretty bytes/hex/string
 function renderBytes(value) {
-    if (typeof value === 'string') return value; // hex/base64/etc.
+    if (value == null) return '';
+    if (typeof value === 'string') return value; // hex/base64/plain
     if (Array.isArray(value) && value.every((x) => Number.isInteger(x) && x >= 0 && x <= 255)) {
         return '0x' + value.map((b) => b.toString(16).padStart(2, '0')).join('');
     }
@@ -20,24 +21,106 @@ function renderBytes(value) {
     }
 }
 
-// ————— normalizer (robust to partial data) —————
-function normalizeTransaction(raw) {
-    const ops = Array.isArray(raw?.operations) ? raw.operations : [];
-    const lt = raw?.ledger_transaction ?? {};
-    const inputs = Array.isArray(lt?.inputs) ? lt.inputs : [];
-    const outputs = Array.isArray(lt?.outputs) ? lt.outputs : [];
+const opLabel = (op) => {
+    if (op == null) return 'op';
+    if (typeof op === 'string' || typeof op === 'number') return String(op);
+    if (typeof op !== 'object') return String(op);
+    if (typeof op.type === 'string') return op.type;
+    if (typeof op.kind === 'string') return op.kind;
+    if (op.content) {
+        if (typeof op.content.type === 'string') return op.content.type;
+        if (typeof op.content.kind === 'string') return op.content.kind;
+    }
+    const keys = Object.keys(op);
+    return keys.length ? keys[0] : 'op';
+};
 
-    const totalOutputValue = outputs.reduce((sum, note) => sum + Number(note?.value ?? 0), 0);
+function opsToPills(ops, limit = 6) {
+    const arr = Array.isArray(ops) ? ops : [];
+    if (!arr.length) return h('span', { style: 'color:var(--muted); whiteSpace: "nowrap";' }, '—');
+    const labels = arr.map(opLabel);
+    const shown = labels.slice(0, limit);
+    const extra = labels.length - shown.length;
+    return h(
+        'div',
+        { style: 'display:flex; gap:6px; flexWrap:"wrap"; alignItems:"center"' },
+        ...shown.map((label, i) =>
+            h('span', { key: `${label}-${i}`, class: 'pill', title: label, style: 'flex:0 0 auto;' }, label),
+        ),
+        extra > 0 && h('span', { class: 'pill', title: `${extra} more`, style: 'flex:0 0 auto;' }, `+${extra}`),
+    );
+}
+
+const toNumber = (v) => {
+    if (v == null) return 0;
+    if (typeof v === 'number') return v;
+    if (typeof v === 'bigint') return Number(v);
+    if (typeof v === 'string') {
+        const s = v.trim();
+        if (/^0x[0-9a-f]+$/i.test(s)) return Number(BigInt(s));
+        const n = Number(s);
+        return Number.isFinite(n) ? n : 0;
+    }
+    if (typeof v === 'object' && v !== null && 'value' in v) return toNumber(v.value);
+    return 0;
+};
+
+function CopyPill({ text, label = 'Copy' }) {
+    const onCopy = async (e) => {
+        e.preventDefault();
+        try {
+            await navigator.clipboard.writeText(String(text ?? ''));
+        } catch {}
+    };
+    return h(
+        'a',
+        {
+            class: 'pill linkish mono',
+            style: 'cursor:pointer; user-select:none;',
+            href: '#',
+            onClick: onCopy,
+            onKeyDown: (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onCopy(e);
+                }
+            },
+            tabIndex: 0,
+            role: 'button',
+        },
+        label,
+    );
+}
+
+// ————— normalizer for new TransactionRead —————
+// { id, block_id, hash, operations:[Operation], inputs:[HexBytes], outputs:[Note{public_key:HexBytes,value:int}],
+//   proof, execution_gas_price, storage_gas_price }
+function normalizeTransaction(raw) {
+    const ops = Array.isArray(raw?.operations) ? raw.operations : Array.isArray(raw?.ops) ? raw.ops : [];
+
+    const inputs = Array.isArray(raw?.inputs) ? raw.inputs : [];
+    const outputs = Array.isArray(raw?.outputs) ? raw.outputs : [];
+
+    const totalOutputValue = outputs.reduce((sum, note) => sum + toNumber(note?.value), 0);
 
     return {
         id: raw?.id ?? '',
         blockId: raw?.block_id ?? null,
-        operations: ops.map(String),
+        hash: renderBytes(raw?.hash),
+        proof: renderBytes(raw?.proof),
+        operations: ops, // keep objects, we’ll label in UI
         executionGasPrice: isNumber(raw?.execution_gas_price)
             ? raw.execution_gas_price
-            : Number(raw?.execution_gas_price ?? 0),
-        storageGasPrice: isNumber(raw?.storage_gas_price) ? raw.storage_gas_price : Number(raw?.storage_gas_price ?? 0),
-        ledger: { inputs, outputs, totalOutputValue },
+            : toNumber(raw?.execution_gas_price),
+        storageGasPrice: isNumber(raw?.storage_gas_price) ? raw.storage_gas_price : toNumber(raw?.storage_gas_price),
+        ledger: {
+            inputs: inputs.map((v) => renderBytes(v)),
+            outputs: outputs.map((n) => ({
+                public_key: renderBytes(n?.public_key),
+                value: toNumber(n?.value),
+            })),
+            totalOutputValue,
+        },
     };
 }
 
@@ -59,8 +142,7 @@ function Summary({ tx }) {
             'div',
             { style: 'display:grid; gap:8px;' },
 
-            // (ID removed)
-
+            // Block link
             tx.blockId != null &&
                 h(
                     'div',
@@ -73,6 +155,34 @@ function Summary({ tx }) {
                     ),
                 ),
 
+            // Hash + copy
+            h(
+                'div',
+                null,
+                h('b', null, 'Hash: '),
+                h(
+                    'span',
+                    { class: 'pill mono', title: tx.hash, style: 'max-width:100%; overflow-wrap:anywhere;' },
+                    String(tx.hash || ''),
+                ),
+                h(CopyPill, { text: tx.hash }),
+            ),
+
+            // Proof + copy (if present)
+            tx.proof &&
+                h(
+                    'div',
+                    null,
+                    h('b', null, 'Proof: '),
+                    h(
+                        'span',
+                        { class: 'pill mono', title: tx.proof, style: 'max-width:100%; overflow-wrap:anywhere;' },
+                        String(tx.proof),
+                    ),
+                    h(CopyPill, { text: tx.proof }),
+                ),
+
+            // Gas
             h(
                 'div',
                 null,
@@ -86,26 +196,14 @@ function Summary({ tx }) {
                 h('span', { class: 'mono' }, toLocaleNum(tx.storageGasPrice)),
             ),
 
-            h(
-                'div',
-                null,
-                h('b', null, 'Operations: '),
-                tx.operations?.length
-                    ? h(
-                          'span',
-                          { style: 'display:inline-flex; gap:6px; flex-wrap:wrap; vertical-align:middle;' },
-                          ...tx.operations.map((op, i) => h('span', { key: i, class: 'pill', title: op }, op)),
-                      )
-                    : h('span', { style: 'color:var(--muted)' }, '—'),
-            ),
+            // Operations (labels as pills)
+            h('div', null, h('b', null, 'Operations: '), opsToPills(tx.operations)),
         ),
     );
 }
 
 function InputsTable({ inputs }) {
-    if (!inputs?.length) {
-        return h('div', { style: 'color:var(--muted)' }, '—');
-    }
+    if (!inputs?.length) return h('div', { style: 'color:var(--muted)' }, '—');
 
     return h(
         'div',
@@ -117,7 +215,7 @@ function InputsTable({ inputs }) {
                 'colgroup',
                 null,
                 h('col', { style: 'width:80px' }), // #
-                h('col', null), // Value (fills)
+                h('col', null), // Value
             ),
             h('thead', null, h('tr', null, h('th', { style: 'text-align:center;' }, '#'), h('th', null, 'Value'))),
             h(
@@ -145,9 +243,7 @@ function InputsTable({ inputs }) {
 }
 
 function OutputsTable({ outputs }) {
-    if (!outputs?.length) {
-        return h('div', { style: 'color:var(--muted)' }, '—');
-    }
+    if (!outputs?.length) return h('div', { style: 'color:var(--muted)' }, '—');
 
     return h(
         'div',
@@ -158,9 +254,9 @@ function OutputsTable({ outputs }) {
             h(
                 'colgroup',
                 null,
-                h('col', { style: 'width:80px' }), // # (compact, centered)
-                h('col', null), // Public Key (fills)
-                h('col', { style: 'width:180px' }), // Value (compact, right)
+                h('col', { style: 'width:80px' }), // #
+                h('col', null), // Public Key
+                h('col', { style: 'width:180px' }), // Value
             ),
             h(
                 'thead',
@@ -169,8 +265,8 @@ function OutputsTable({ outputs }) {
                     'tr',
                     null,
                     h('th', { style: 'text-align:center;' }, '#'),
-                    h('th', null, 'Public Key'), // ← back to Public Key second
-                    h('th', { style: 'text-align:right;' }, 'Value'), // ← Value last
+                    h('th', null, 'Public Key'),
+                    h('th', { style: 'text-align:right;' }, 'Value'),
                 ),
             ),
             h(
@@ -180,26 +276,18 @@ function OutputsTable({ outputs }) {
                     h(
                         'tr',
                         { key: idx },
-                        // # (index)
                         h('td', { style: 'text-align:center;' }, String(idx)),
-
-                        // Public Key (fills, wraps)
                         h(
                             'td',
                             null,
                             h(
                                 'span',
-                                {
-                                    class: 'mono',
-                                    style: 'display:inline-block; overflow-wrap:anywhere; word-break:break-word;',
-                                    title: renderBytes(note?.public_key),
-                                },
-                                renderBytes(note?.public_key),
+                                { class: 'mono', style: 'display:inline-block; overflow-wrap:anywhere;' },
+                                String(note.public_key ?? ''),
                             ),
+                            h('span', { class: 'sr-only' }, ' '),
                         ),
-
-                        // Value (right-aligned)
-                        h('td', { class: 'amount', style: 'text-align:right;' }, toLocaleNum(note?.value)),
+                        h('td', { class: 'amount', style: 'text-align:right;' }, toLocaleNum(note.value)),
                     ),
                 ),
             ),
@@ -208,25 +296,25 @@ function OutputsTable({ outputs }) {
 }
 
 function Ledger({ ledger }) {
-    const { inputs, outputs, totalOutputValue } = ledger;
-
-    // Sum inputs as integers (Fr is declared as int in your schema)
-    const totalInputValue = inputs.reduce((sum, v) => sum + Number(v ?? 0), 0);
+    const inputs = Array.isArray(ledger?.inputs) ? ledger.inputs : [];
+    const outputs = Array.isArray(ledger?.outputs) ? ledger.outputs : [];
+    const totalInputValue = inputs.reduce((s, v) => s + toNumber(v), 0);
+    const totalOutputValue = toNumber(ledger?.totalOutputValue);
 
     return h(
         SectionCard,
-        { title: 'Ledger Transaction' },
+        { title: 'Ledger' },
         h(
             'div',
             { style: 'display:grid; gap:16px;' },
 
-            // Inputs (with Total on the right)
+            // Inputs
             h(
                 'div',
                 null,
                 h(
                     'div',
-                    { style: 'display:flex; align-items:center; gap:8px;' },
+                    { style: 'display:flex; alignItems:center; gap:8px;' },
                     h('b', null, 'Inputs'),
                     h('span', { class: 'pill' }, String(inputs.length)),
                     h(
@@ -238,13 +326,13 @@ function Ledger({ ledger }) {
                 h(InputsTable, { inputs }),
             ),
 
-            // Outputs (unchanged header total)
+            // Outputs
             h(
                 'div',
                 null,
                 h(
                     'div',
-                    { style: 'display:flex; align-items:center; gap:8px;' },
+                    { style: 'display:flex; alignItems:center; gap:8px;' },
                     h('b', null, 'Outputs'),
                     h('span', { class: 'pill' }, String(outputs.length)),
                     h(
@@ -317,7 +405,7 @@ export default function TransactionDetail({ parameters }) {
 
         h(
             'header',
-            { style: 'display:flex; gap:12px; align-items:center; margin:12px 0;' },
+            { style: 'display:flex; gap:12px; alignItems:center; margin:12px 0;' },
             h('a', { class: 'linkish', href: '/' }, '← Back'),
             h('h1', { style: 'margin:0' }, pageTitle),
         ),
