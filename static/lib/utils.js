@@ -12,6 +12,7 @@ export async function streamNdjson(url, handleItem, { signal, onError = () => {}
         signal,
         cache: 'no-cache',
     });
+
     if (!response.ok || !response.body) {
         throw new Error(`Stream failed: ${response.status}`);
     }

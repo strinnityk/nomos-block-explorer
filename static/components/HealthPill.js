@@ -16,10 +16,10 @@ export default function HealthPill() {
 
     // Flash animation whenever status changes
     useEffect(() => {
-        const el = pillRef.current;
-        if (!el) return;
-        el.classList.add('flash');
-        const id = setTimeout(() => el.classList.remove('flash'), 750);
+        const pillElement = pillRef.current;
+        if (!pillElement) return;
+        pillElement.classList.add('flash');
+        const id = setTimeout(() => pillElement.classList.remove('flash'), 750);
         return () => clearTimeout(id);
     }, [status]);
 

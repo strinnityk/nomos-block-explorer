@@ -1,7 +1,7 @@
 // static/pages/BlockDetailPage.js
 import { h, Fragment } from 'preact';
 import { useEffect, useMemo, useState } from 'preact/hooks';
-import { API, PAGE } from '../lib/api.js?dev=1';
+import { API, PAGE } from '../lib/api.js';
 
 const OPERATIONS_PREVIEW_LIMIT = 2;
 

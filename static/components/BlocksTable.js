@@ -1,8 +1,9 @@
 // static/pages/BlocksTable.js
 import { h } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';
-import { PAGE, API, TABLE_SIZE } from '../lib/api.js?dev=1';
-import { streamNdjson, ensureFixedRowCount, shortenHex } from '../lib/utils.js?dev=1';
+import { PAGE, API } from '../lib/api.js';
+import { TABLE_SIZE } from '../lib/constants.js';
+import { streamNdjson, ensureFixedRowCount, shortenHex } from '../lib/utils.js';
 
 export default function BlocksTable() {
     const bodyRef = useRef(null);

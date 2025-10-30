@@ -1,5 +1,4 @@
-export const API_PREFIX = '/api/v1';
-export const TABLE_SIZE = 10;
+const API_PREFIX = '/api/v1';
 
 const joinUrl = (...parts) => parts.join('/').replace(/\/{2,}/g, '/');
 const encodeId = (id) => encodeURIComponent(String(id));

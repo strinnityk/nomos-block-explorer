@@ -1,7 +1,7 @@
 // static/pages/TransactionDetail.js
 import { h, Fragment } from 'preact';
 import { useEffect, useMemo, useState } from 'preact/hooks';
-import { API } from '../lib/api.js?dev=1';
+import { API } from '../lib/api.js';
 
 // ————— helpers —————
 const isNumber = (v) => typeof v === 'number' && !Number.isNaN(v);

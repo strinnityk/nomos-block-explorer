@@ -1,13 +1,14 @@
 // static/pages/TransactionsTable.js
 import { h } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';
-import { API, TABLE_SIZE } from '../lib/api.js?dev=1';
+import { API } from '../lib/api.js';
+import { TABLE_SIZE } from '../lib/constants.js';
 import {
     streamNdjson,
     ensureFixedRowCount,
     shortenHex, // (kept in case you want to use later)
     withBenignFilter,
-} from '../lib/utils.js?dev=1';
+} from '../lib/utils.js';
 
 const OPERATIONS_PREVIEW_LIMIT = 2;
 

@@ -1,11 +1,11 @@
 import { h, render, Fragment } from 'preact';
 
-import Router from './components/Router.js?dev=1';
-import HealthPill from './components/HealthPill.js?dev=1';
+import Router from './components/Router.js';
+import HealthPill from './components/HealthPill.js';
 
-import HomePage from './pages/Home.js?dev=1';
-import BlockDetailPage from './pages/BlockDetail.js?dev=1';
-import TransactionDetailPage from './pages/TransactionDetail.js?dev=1';
+import HomePage from './pages/Home.js';
+import BlockDetailPage from './pages/BlockDetail.js';
+import TransactionDetailPage from './pages/TransactionDetail.js';
 
 const ROOT = document.getElementById('app');
 
