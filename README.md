@@ -17,3 +17,7 @@ There are a few assumptions made to facilitate the development of the PoC:
 - Tests
 - Fix assumption of 1 block per slot
 - Log colouring
+- Handle reconnections:
+  - Failures to connect to Node
+  - Timeouts
+  - Stream closed

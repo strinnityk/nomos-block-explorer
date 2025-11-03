@@ -9,11 +9,9 @@ from db.blocks import BlockRepository
 from db.clients import SqliteClient
 from db.transaction import TransactionRepository
 from models.block import Block
-from node.api.fake import FakeNodeApi
-from node.api.http import HttpNodeApi
+from node.api.builder import build_node_api
 from node.api.serializers.block import BlockSerializer
-from node.manager.docker import DockerModeManager
-from node.manager.fake import FakeNodeManager
+from node.manager.builder import build_node_manager
 
 if TYPE_CHECKING:
     from core.app import NBE
@@ -23,16 +21,14 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def node_lifespan(app: "NBE") -> AsyncGenerator[None]:
+    app.state.node_manager = build_node_manager(app.settings)
+    app.state.node_api = build_node_api(app.settings)
+
     db_client = SqliteClient()
-
-    app.state.node_manager = FakeNodeManager()
-    # app.state.node_manager = DockerModeManager(app.settings.node_compose_filepath)
-    # app.state.node_api = FakeNodeApi()
-    app.state.node_api = HttpNodeApi(host="127.0.0.1", port=18080)
-
     app.state.db_client = db_client
     app.state.block_repository = BlockRepository(db_client)
     app.state.transaction_repository = TransactionRepository(db_client)
+
     try:
         logger.info("Starting node...")
         await app.state.node_manager.start()
@@ -74,7 +70,6 @@ async def subscribe_to_updates(app: "NBE") -> None:
     logger.info("✅ Subscription to new blocks and transactions started.")
     async with TaskGroup() as tg:
         tg.create_task(subscribe_to_new_blocks(app))
-        tg.create_task(subscribe_to_new_transactions(app))
     logger.info("Subscription to new blocks and transactions finished.")
 
 
@@ -96,39 +91,25 @@ async def subscribe_to_new_blocks(app: "NBE"):
             except TimeoutError:
                 continue
             except StopAsyncIteration:
-                import traceback
-
-                traceback.print_exc()
-                logger.error("Subscription to the new blocks stream ended unexpectedly. Please restart the node.")
+                logger.error(f"Subscription to the new blocks stream ended unexpectedly. Please restart the node.")
                 break
-            except Exception as e:
-                import traceback
-
-                traceback.print_exc()
-                logger.error(f"Error while fetching new blocks: {e}")
+            except Exception as error:
+                logger.exception(f"Error while fetching new blocks: {error}")
                 continue
 
             try:
                 block = block_serializer.into_block()
                 await app.state.block_repository.create(block)
-            except Exception as e:
-                import traceback
-
-                traceback.print_exc()
-                logger.error(f"Error while saving new block: {e}")
+            except Exception as error:
+                logger.exception(f"Error while storing new block: {error}")
     finally:
         await _gracefully_close_stream(blocks_stream)
-
-
-async def subscribe_to_new_transactions(_app: "NBE"):
-    pass
 
 
 async def backfill(app: "NBE") -> None:
     logger.info("Backfilling started.")
     async with TaskGroup() as tg:
         tg.create_task(backfill_blocks(app, db_hit_interval_seconds=3))
-        tg.create_task(backfill_transactions(app))
     logger.info("✅ Backfilling finished.")
 
 
@@ -167,7 +148,3 @@ async def backfill_blocks(app: "NBE", *, db_hit_interval_seconds: int, batch_siz
         await app.state.block_repository.create(*blocks)
         slot_to = slot_from - 1
     logger.info("Backfilling blocks completed.")
-
-
-async def backfill_transactions(_app: "NBE"):
-    pass

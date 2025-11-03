@@ -1,5 +1,5 @@
 from asyncio import Task, gather
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import FastAPI
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -19,6 +19,14 @@ class NBESettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=ENV_FILEPATH, extra="ignore")
 
     node_compose_filepath: str
+
+    node_api: Literal["http", "fake"]
+    node_manager: Literal["docker", "noop"]
+
+    node_api_host: str = "127.0.0.1"
+    node_api_port: int = 8000
+    node_api_timeout: int = 60
+    node_api_protocol: str = "http"
 
 
 class NBEState(State):
@@ -54,4 +62,4 @@ class NBE(FastAPI):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.state = NBEState()
-        self.settings = NBESettings()  # type: ignore[call-arg]  # Missing parameter is filled from env file
+        self.settings = NBESettings()  # type: ignore[call-arg] # The missing parameter is filled from the env file

@@ -1,11 +1,18 @@
 from abc import ABC, abstractmethod
-from typing import AsyncIterator, List
+from typing import TYPE_CHECKING, AsyncIterator, List
 
 from node.api.serializers.block import BlockSerializer
 from node.api.serializers.health import HealthSerializer
 
+if TYPE_CHECKING:
+    from core.app import NBESettings
+
 
 class NodeApi(ABC):
+    @abstractmethod
+    def __init__(self, _settings: "NBESettings"):
+        pass
+
     @abstractmethod
     async def get_health(self) -> HealthSerializer:
         pass

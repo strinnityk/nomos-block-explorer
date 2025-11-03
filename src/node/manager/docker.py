@@ -1,4 +1,5 @@
 import logging
+from typing import TYPE_CHECKING
 
 from python_on_whales import DockerException
 from python_on_whales.docker_client import DockerClient
@@ -6,14 +7,18 @@ from rusty_results import Err, Ok, Result
 
 from node.manager.base import NodeManager
 
+if TYPE_CHECKING:
+    from core.app import NBESettings
+
+
 logger = logging.getLogger(__name__)
 
 
 class DockerModeManager(NodeManager):
-    def __init__(self, compose_filepath: str):
+    def __init__(self, settings: "NBESettings"):
         self.client: DockerClient = DockerClient(
             client_type="docker",
-            compose_files=[compose_filepath],
+            compose_files=[settings.node_compose_filepath],
         )
 
         match self.ps():
@@ -34,7 +39,7 @@ class DockerModeManager(NodeManager):
     async def start(self):
         services = self.ps().map(lambda _services: len(_services)).expect("Failed to get compose services.")
         if services > 0:
-            logger.warn("Compose services are already running.")
+            logger.warning("Compose services are already running.")
             return
 
         self.client.compose.up(

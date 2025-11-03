@@ -1,13 +1,18 @@
 import logging
-from typing import AsyncIterator, List
+from typing import TYPE_CHECKING, AsyncIterator, List
 from urllib.parse import urljoin
 
 import httpx
 import requests
+from pydantic import ValidationError
 
 from node.api.base import NodeApi
 from node.api.serializers.block import BlockSerializer
 from node.api.serializers.health import HealthSerializer
+
+if TYPE_CHECKING:
+    from core.app import NBESettings
+
 
 logger = logging.getLogger(__name__)
 
@@ -18,11 +23,11 @@ class HttpNodeApi(NodeApi):
     ENDPOINT_BLOCKS = "/cryptarchia/blocks"
     ENDPOINT_BLOCKS_STREAM = "/cryptarchia/blocks/stream"
 
-    def __init__(self, host: str, port: int, protocol: str = "http", timeout: int = 60):
-        self.host: str = host
-        self.port: int = port
-        self.protocol: str = protocol
-        self.timeout: int = timeout
+    def __init__(self, settings: "NBESettings"):
+        self.host: str = settings.node_api_host
+        self.port: int = settings.node_api_port
+        self.protocol: str = settings.node_api_protocol or "http"
+        self.timeout: int = settings.node_api_timeout or 60
 
     @property
     def base_url(self):
@@ -57,10 +62,9 @@ class HttpNodeApi(NodeApi):
                         continue
                     try:
                         block = BlockSerializer.model_validate_json(line)
-                    except Exception as e:
-                        import traceback
+                    except ValidationError as error:
+                        logger.exception(error)
+                        continue
 
-                        traceback.print_exc()
-                        raise e
                     logger.debug(f"Received new block from Node: {block}")
                     yield block

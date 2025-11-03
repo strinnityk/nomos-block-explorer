@@ -1,12 +1,15 @@
 from asyncio import sleep
 from random import choices, random
-from typing import AsyncIterator, List
+from typing import TYPE_CHECKING, AsyncIterator, List
 
 from rusty_results import Some
 
 from node.api.base import NodeApi
 from node.api.serializers.block import BlockSerializer
 from node.api.serializers.health import HealthSerializer
+
+if TYPE_CHECKING:
+    from core.app import NBESettings
 
 
 def get_weighted_amount() -> int:
@@ -16,7 +19,7 @@ def get_weighted_amount() -> int:
 
 
 class FakeNodeApi(NodeApi):
-    def __init__(self):
+    def __init__(self, _settings: "NBESettings"):
         self.current_slot: int = 0
 
     async def get_health(self) -> HealthSerializer:
