@@ -1,4 +1,5 @@
 import asyncio
+from os import getenv
 
 import uvicorn
 from dotenv import load_dotenv
@@ -9,10 +10,13 @@ from logs import setup_logging
 
 async def main():
     app = create_app()
+
+    host = getenv("NBE_HOST", "0.0.0.0")
+    port = int(getenv("NBE_PORT", 8000))
     config = uvicorn.Config(
         app,
-        host="127.0.0.1",
-        port=8000,
+        host=host,
+        port=port,
         reload=False,
         loop="asyncio",
         log_config=None,

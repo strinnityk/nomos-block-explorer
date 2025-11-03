@@ -24,7 +24,7 @@ class NBESettings(BaseSettings):
     node_manager: Literal["docker", "noop"]
 
     node_api_host: str = "127.0.0.1"
-    node_api_port: int = 8000
+    node_api_port: int = 18080
     node_api_timeout: int = 60
     node_api_protocol: str = "http"
 
