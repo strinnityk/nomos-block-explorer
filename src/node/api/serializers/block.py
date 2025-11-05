@@ -13,9 +13,8 @@ from utils.protocols import FromRandom
 
 
 def _should_randomize_transactions():
-    is_debug = getenv("DEBUG", "False").lower() == "true"
-    is_debug__randomize_transactions = getenv("DEBUG__RANDOMIZE_TRANSACTIONS", "False").lower() == "true"
-    return is_debug and is_debug__randomize_transactions
+    is_debug = getenv("NBE_DEBUG", "False").lower() == "true"
+    return is_debug
 
 
 def _get_random_transactions() -> List[SignedTransactionSerializer]:
@@ -34,7 +33,7 @@ class BlockSerializer(NbeSerializer, FromRandom):
     def model_validate_json(cls, *args, **kwargs) -> Self:
         self = super().model_validate_json(*args, **kwargs)
         if _should_randomize_transactions():
-            logger.debug("DEBUG and DEBUG__RANDOMIZE_TRANSACTIONS are enabled, randomizing Block's transactions.")
+            logger.debug("DEBUG flag is enabled, randomizing Block's transactions.")
             self.transactions = _get_random_transactions()
         return self
 

@@ -16,6 +16,9 @@ logger = logging.getLogger(__name__)
 
 class DockerModeManager(NodeManager):
     def __init__(self, settings: "NBESettings"):
+        if not settings.node_compose_filepath:
+            raise ValueError("Node compose filepath environment variable is not set.")
+
         self.client: DockerClient = DockerClient(
             client_type="docker",
             compose_files=[settings.node_compose_filepath],

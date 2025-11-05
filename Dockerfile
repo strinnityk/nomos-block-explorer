@@ -5,11 +5,10 @@ COPY . /app
 WORKDIR /app
 
 # Environment variables
-ENV NODE_COMPOSE_FILEPATH=/app/docker-compose.yml
 ENV PYTHONPATH=/app:/app/src
 ENV UV_INSTALL_DIR=/usr/local/bin
-ENV NODE_API=http
-ENV NODE_MANAGER=noop
+ENV NBE_NODE_API=http
+ENV NBE_NODE_MANAGER=noop
 
 # Package manager and dependencies
 # RUN apt-get update && apt-get install -y curl git

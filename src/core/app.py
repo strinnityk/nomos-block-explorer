@@ -2,6 +2,7 @@ from asyncio import Task, gather
 from typing import Literal, Optional
 
 from fastapi import FastAPI
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from starlette.datastructures import State
 
@@ -18,15 +19,15 @@ ENV_FILEPATH = DIR_REPO.joinpath(".env")
 class NBESettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=ENV_FILEPATH, extra="ignore")
 
-    node_compose_filepath: str
+    node_compose_filepath: Optional[str] = Field(alias="NBE_NODE_COMPOSE_FILEPATH", default=None)
 
-    node_api: Literal["http", "fake"]
-    node_manager: Literal["docker", "noop"]
+    node_api: Literal["http", "fake"] = Field(alias="NBE_NODE_API")
+    node_manager: Literal["docker", "noop"] = Field(alias="NBE_NODE_MANAGER")
 
-    node_api_host: str = "127.0.0.1"
-    node_api_port: int = 18080
-    node_api_timeout: int = 60
-    node_api_protocol: str = "http"
+    node_api_host: str = Field(alias="NBE_NODE_API_HOST", default="127.0.0.1")
+    node_api_port: int = Field(alias="NBE_NODE_API_PORT", default=18080)
+    node_api_timeout: int = Field(alias="NBE_NODE_API_TIMEOUT", default=60)
+    node_api_protocol: str = Field(alias="NBE_NODE_API_PROTOCOL", default="http")
 
 
 class NBEState(State):
