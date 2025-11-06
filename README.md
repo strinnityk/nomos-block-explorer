@@ -2,6 +2,8 @@
 
 This is a Proof of Concept (PoC) for a block explorer for the Nomos blockchain.
 
+![Nomos Block Explorer Screenshot](resources/webui.png)
+
 ## Features
 
 - Frontend (React-like SPA)
@@ -90,6 +92,14 @@ B <--> D["Database<br/>(SQLite)"]
     docker build -t nomos-block-explorer . && docker run -p 8000:8000 nomos-block-explorer
     ```
 
+- If you want to run the Explorer without a Node, make sure to set the `NBE_NODE_API` environment variable to `fake`:
+    1. ```bash
+       NBE_NODE_API=fake python src/main.py
+       ```
+    2. ```bash
+       docker run -e NBE_NODE_API=fake -p 8000:8000 nomos-block-explorer
+       ```
+
 ### Configuration
 
 The block explorer is configured through environment variables. The following variables are available:
@@ -137,5 +147,9 @@ This PoC makes simplifications to focus on the core features:
   - Timeouts
   - Stream closed
 - Frontend
-  - Add a block / transaction search bar
+  - Add a block / transaction search barImprove
   - Make pages work with block/transaction hash, rather than the `id`
+- Error handling
+  - Exceptions raised within async code pop up as ugly stack traces
+  - Better error messages
+- Remove DB IDs from API responses and use hashes instead
